@@ -1,0 +1,31 @@
+{
+  "policy": {
+    "type": "reward_classifier",
+    "model_name": "helper2424/resnet10",
+    "model_type": "cnn",
+    "num_cameras": 1,
+    "num_classes": 2,
+    "hidden_dim": 256,
+    "dropout_rate": 0.1,
+    "learning_rate": 1e-4,
+    "device": "cuda",
+    "use_amp": true,
+    "input_features": {
+      "observation.images.front": {
+        "type": "VISUAL",
+        "shape": [3, 128, 128]
+      }
+    }
+  },
+  "dataset": {
+    "repo_id": "your_username/piper_pick_lift",
+    "root": "data/demos"
+  },
+  "training": {
+    "num_epochs": 50,
+    "batch_size": 32,
+    "eval_freq": 5,
+    "save_freq": 10
+  },
+  "output_dir": "outputs/reward_classifier"
+}
