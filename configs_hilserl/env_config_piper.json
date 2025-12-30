@@ -20,17 +20,17 @@
         "gripper_penalty": 0.0
       },
       "reset": {
-        "fixed_reset_joint_positions": null,
+        "fixed_reset_joint_positions": [0.0, 90.0, -85.0, 0.0, 0.0, 0.0, 35.0],
         "reset_time_s": 5.0,
         "control_time_s": 20.0,
         "terminate_on_success": true
       },
       "inverse_kinematics": {
-        "urdf_path": "path/to/piper.urdf",
+        "urdf_path": null,
         "target_frame_name": "end_effector",
         "end_effector_bounds": {
-          "min": [-0.5, -0.5, 0.0],
-          "max": [0.5, 0.5, 0.5]
+          "min": [0.1, -0.2, 0.02],
+          "max": [0.4, 0.2, 0.3]
         },
         "end_effector_step_sizes": {
           "x": 0.02,
@@ -43,12 +43,22 @@
         "success_threshold": 0.5,
         "success_reward": 1.0
       },
-      "max_gripper_pos": 100.0
+      "max_gripper_pos": 70.0
     },
     "robot": {
       "type": "piper_follower",
-      "port": "/dev/ttyUSB0",
-      "id": "piper"
+      "can_name": "can0",
+      "id": "piper_arm",
+      "use_degrees": true,
+      "cameras": {
+        "observation.images.front": {
+          "type": "opencv",
+          "index_or_path": 0,
+          "width": 640,
+          "height": 480,
+          "fps": 30
+        }
+      }
     },
     "teleop": {
       "type": "gamepad",
@@ -56,7 +66,7 @@
     }
   },
   "dataset": {
-    "repo_id": "your_username/piper_pick_lift",
+    "repo_id": "thu-vlnlab/piper_pick_lift",
     "root": "data/demos",
     "task": "pick_and_lift",
     "num_episodes_to_record": 15,
