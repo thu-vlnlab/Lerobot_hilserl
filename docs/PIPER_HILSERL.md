@@ -21,7 +21,7 @@ git clone git@github.com:thu-vlnlab/Lerobot_hilserl.git
 cd Lerobot_hilserl
 
 # 创建虚拟环境
-conda create -n lerobot python=3.10
+conda create -n lerobot python=3.10 -c conda-forge
 conda activate lerobot
 
 # 安装 LeRobot 及 HIL-SERL 依赖
