@@ -673,9 +673,16 @@ def control_loop(
                 if isinstance(v, torch.Tensor)
             }
             # Use teleop_action if available, otherwise use the action from the transition
-            action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get(
-                "teleop_action", transition[TransitionKey.ACTION]
-            )
+            # For gym_hil, teleop_action is in INFO (priority); for real robot, it's in COMPLEMENTARY_DATA
+            # Check INFO first (gym_hil returns actual gamepad action here)
+            action_to_record = transition[TransitionKey.INFO].get("teleop_action")
+            if action_to_record is None:
+                action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get("teleop_action")
+            if action_to_record is None:
+                action_to_record = transition[TransitionKey.ACTION]
+            # Convert numpy array to tensor if needed
+            if not isinstance(action_to_record, torch.Tensor):
+                action_to_record = torch.tensor(action_to_record, dtype=torch.float32)
             frame = {
                 **observations,
                 ACTION: action_to_record.cpu(),
