@@ -1,0 +1,256 @@
+{
+  "_comment": "HIL-SERL 完整配置参考 - 从源代码整理",
+  "_source_files": [
+    "src/lerobot/policies/sac/configuration_sac.py",
+    "src/lerobot/configs/train.py"
+  ],
+
+  "batch_size": 64,
+  "steps": 100000,
+  "seed": 1000,
+  "num_workers": 4,
+  "save_checkpoint": true,
+  "save_freq": 20000,
+  "log_freq": 200,
+  "eval_freq": 20000,
+  "resume": false,
+  "output_dir": null,
+
+  "policy": {
+    "type": "sac",
+    "push_to_hub": false,
+    "device": "cuda",
+    "storage_device": "cuda",
+
+    "_comment_sac": "========== SAC 算法参数 ==========",
+    "discount": 0.99,
+    "temperature_init": 0.01,
+    "target_entropy": null,
+    "num_critics": 2,
+    "num_subsample_critics": null,
+    "critic_target_update_weight": 0.005,
+    "utd_ratio": 20,
+    "grad_clip_norm": 40.0,
+    "use_backup_entropy": true,
+
+    "_comment_lr": "========== 学习率 ==========",
+    "actor_lr": 3e-4,
+    "critic_lr": 3e-4,
+    "temperature_lr": 3e-4,
+
+    "_comment_buffer": "========== Buffer 配置 ==========",
+    "online_buffer_capacity": 10000,
+    "offline_buffer_capacity": 5000,
+    "online_step_before_learning": 100,
+    "async_prefetch": false,
+    "online_steps": 1000000,
+    "policy_update_freq": 1,
+
+    "_comment_encoder": "========== 网络架构 ==========",
+    "vision_encoder_name": null,
+    "freeze_vision_encoder": true,
+    "shared_encoder": true,
+    "latent_dim": 256,
+    "image_encoder_hidden_dim": 32,
+    "image_embedding_pooling_dim": 8,
+    "state_encoder_hidden_dim": 256,
+
+    "_comment_discrete": "========== 离散动作 (夹爪) ==========",
+    "num_discrete_actions": null,
+
+    "_comment_network": "========== 网络层配置 ==========",
+    "actor_network_kwargs": {
+      "hidden_dims": [256, 256],
+      "activate_final": true
+    },
+    "critic_network_kwargs": {
+      "hidden_dims": [256, 256],
+      "activate_final": true,
+      "final_activation": null
+    },
+    "discrete_critic_network_kwargs": {
+      "hidden_dims": [256, 256],
+      "activate_final": true,
+      "final_activation": null
+    },
+    "policy_kwargs": {
+      "use_tanh_squash": true,
+      "std_min": 1e-5,
+      "std_max": 10.0,
+      "init_final": 0.05
+    },
+
+    "_comment_actor_learner": "========== Actor-Learner 通信 ==========",
+    "actor_learner_config": {
+      "learner_host": "localhost",
+      "learner_port": 50051,
+      "policy_parameters_push_frequency": 2,
+      "queue_get_timeout": 2.0
+    },
+
+    "_comment_concurrency": "========== 并发配置 ==========",
+    "concurrency": {
+      "actor": "threads",
+      "learner": "threads"
+    },
+
+    "_comment_features": "========== 输入输出特征 ==========",
+    "input_features": {
+      "observation.images.front": {
+        "type": "VISUAL",
+        "shape": [3, 128, 128]
+      },
+      "observation.state": {
+        "type": "STATE",
+        "shape": [18]
+      }
+    },
+    "output_features": {
+      "action": {
+        "type": "ACTION",
+        "shape": [4]
+      }
+    },
+
+    "_comment_normalization": "========== 归一化配置 ==========",
+    "normalization_mapping": {
+      "VISUAL": "MEAN_STD",
+      "STATE": "MIN_MAX",
+      "ENV": "MIN_MAX",
+      "ACTION": "MIN_MAX"
+    },
+    "dataset_stats": {
+      "observation.image": {
+        "mean": [0.485, 0.456, 0.406],
+        "std": [0.229, 0.224, 0.225]
+      },
+      "observation.state": {
+        "min": [0.0, 0.0],
+        "max": [1.0, 1.0]
+      },
+      "action": {
+        "min": [0.0, 0.0, 0.0],
+        "max": [1.0, 1.0, 1.0]
+      }
+    },
+
+    "_comment_optimize": "========== 优化选项 ==========",
+    "use_torch_compile": true
+  },
+
+  "env": {
+    "type": "gym_manipulator",
+    "name": "gym_hil",
+    "task": "PandaPickCubeGamepad-v0",
+    "fps": 10,
+
+    "features": {
+      "action": {
+        "type": "ACTION",
+        "shape": [4]
+      },
+      "observation.images.front": {
+        "type": "VISUAL",
+        "shape": [3, 128, 128]
+      },
+      "observation.state": {
+        "type": "STATE",
+        "shape": [18]
+      }
+    },
+    "features_map": {
+      "action": "action",
+      "observation.images.front": "observation.images.front",
+      "observation.state": "observation.state"
+    },
+
+    "processor": {
+      "control_mode": "gamepad",
+      "observation": null,
+      "image_preprocessing": {
+        "crop_params_dict": {},
+        "resize_size": [128, 128]
+      },
+      "gripper": {
+        "use_gripper": true,
+        "gripper_penalty": -0.02
+      },
+      "reset": {
+        "fixed_reset_joint_positions": null,
+        "reset_time_s": 5.0,
+        "control_time_s": 15.0,
+        "terminate_on_success": true
+      },
+      "reward_classifier": {
+        "pretrained_path": "/path/to/reward_classifier/checkpoint",
+        "success_threshold": 0.7,
+        "success_reward": 1.0
+      },
+      "inverse_kinematics": null,
+      "max_gripper_pos": null
+    },
+
+    "robot": null,
+    "teleop": null
+  },
+
+  "dataset": null,
+
+  "wandb": {
+    "enable": true,
+    "project": "panda-hilserl-sim",
+    "entity": null
+  },
+
+  "_comment_param_guide": "==================== 参数调优指南 ====================",
+  "_param_guide": {
+    "batch_size": {
+      "description": "每批次样本数",
+      "simple_task": 64,
+      "complex_task": 256,
+      "note": "增大可提高GPU利用率，但需要更多显存"
+    },
+    "utd_ratio": {
+      "description": "每收集1步数据，执行多少次梯度更新",
+      "default": 20,
+      "note": "高UTD提高数据效率，但可能过拟合"
+    },
+    "online_buffer_capacity": {
+      "description": "在线buffer容量 (Agent+人类数据)",
+      "simple_task": 5000,
+      "complex_task": 50000
+    },
+    "offline_buffer_capacity": {
+      "description": "离线buffer容量 (纯人类示范)",
+      "simple_task": 2000,
+      "complex_task": 10000
+    },
+    "discount": {
+      "description": "折扣因子 gamma",
+      "default": 0.99,
+      "note": "越接近1越重视长期奖励"
+    },
+    "temperature_init": {
+      "description": "SAC温度参数初始值",
+      "exploration": 0.1,
+      "exploitation": 0.01,
+      "note": "高温度=更多探索，低温度=更多利用"
+    },
+    "num_discrete_actions": {
+      "description": "离散动作数量 (夹爪)",
+      "continuous": null,
+      "discrete": 2,
+      "note": "null=连续夹爪, 2=离散开/关"
+    },
+    "critic_target_update_weight": {
+      "description": "目标网络软更新系数 tau",
+      "default": 0.005,
+      "note": "越小更新越慢越稳定"
+    },
+    "actor_lr / critic_lr": {
+      "description": "学习率",
+      "default": 3e-4,
+      "note": "可尝试 1e-4 到 1e-3"
+    }
+  }
+}
