@@ -1,0 +1,1 @@
+./scripts/run_hilserl.sh train-actor  configs_hilserl/train_config_hilserl.json
