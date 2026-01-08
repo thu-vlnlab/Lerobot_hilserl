@@ -1,4 +1,5 @@
 {
+  "batch_size": 64,
   "policy": {
     "type": "sac",
     "push_to_hub": false,
@@ -87,10 +88,7 @@
     "robot": null,
     "teleop": null
   },
-  "dataset": {
-    "repo_id": "test/sim_demo",
-    "root": "/home/qzl/data/sim_demos"
-  },
+  "dataset": null,
   "wandb": {
     "enable": true,
     "project": "panda-hilserl-sim",

@@ -331,6 +331,7 @@ def act_with_policy(
             "discrete_penalty": torch.tensor(
                 [new_transition[TransitionKey.COMPLEMENTARY_DATA].get("discrete_penalty", 0.0)]
             ),
+            TeleopEvents.IS_INTERVENTION: intervention_info.get(TeleopEvents.IS_INTERVENTION, False),
         }
         # Create transition for learner (convert to old format)
         list_transition_to_send_to_learner.append(
