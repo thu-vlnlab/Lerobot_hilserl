@@ -140,7 +140,8 @@ def bytes_to_python_object(buffer: bytes) -> Any:
 def bytes_to_transitions(buffer: bytes) -> list[Transition]:
     bytes_buffer = io.BytesIO(buffer)
     bytes_buffer.seek(0)
-    transitions = torch.load(bytes_buffer, weights_only=True)
+    # weights_only=False: 允许加载 TeleopEvents 等自定义类
+    transitions = torch.load(bytes_buffer, weights_only=False)
     return transitions
 
 

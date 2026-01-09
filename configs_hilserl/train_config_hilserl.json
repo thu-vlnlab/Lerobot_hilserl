@@ -14,6 +14,7 @@
     "storage_device": "cuda",
     "online_buffer_capacity": 2000,
     "offline_buffer_capacity": 2000,
+    "num_discrete_actions": 3,
     "actor_learner_config": {
       "policy_parameters_push_frequency": 2,
       "learner_host": "localhost",
@@ -32,7 +33,7 @@
     "output_features": {
       "action": {
         "type": "ACTION",
-        "shape": [4]
+        "shape": [3]
       }
     }
   },

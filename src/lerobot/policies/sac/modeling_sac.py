@@ -81,8 +81,14 @@ class SACPolicy(
         raise NotImplementedError("SACPolicy does not support action chunking. It returns single actions!")
 
     @torch.no_grad()
-    def select_action(self, batch: dict[str, Tensor]) -> Tensor:
-        """Select action for inference/evaluation"""
+    def select_action(self, batch: dict[str, Tensor], explore: bool = True) -> Tensor:
+        """Select action for inference/evaluation
+
+        Args:
+            batch: Observation batch
+            explore: If True, use epsilon-greedy for discrete actions (training)
+                     If False, use greedy selection (evaluation)
+        """
 
         observations_features = None
         if self.shared_encoder and self.actor.encoder.has_images:
@@ -92,7 +98,17 @@ class SACPolicy(
 
         if self.config.num_discrete_actions is not None:
             discrete_action_value = self.discrete_critic(batch, observations_features)
-            discrete_action = torch.argmax(discrete_action_value, dim=-1, keepdim=True)
+            # Epsilon-greedy exploration for discrete actions
+            if explore and torch.rand(1).item() < self.config.discrete_action_epsilon:
+                # Random action
+                discrete_action = torch.randint(
+                    0, self.config.num_discrete_actions,
+                    (discrete_action_value.shape[0], 1),
+                    device=discrete_action_value.device
+                )
+            else:
+                # Greedy action
+                discrete_action = torch.argmax(discrete_action_value, dim=-1, keepdim=True)
             actions = torch.cat([actions, discrete_action], dim=-1)
 
         return actions

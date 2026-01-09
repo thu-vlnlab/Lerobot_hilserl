@@ -174,7 +174,7 @@ def rollout(
 
         observation = preprocessor(observation)
         with torch.inference_mode():
-            action = policy.select_action(observation)
+            action = policy.select_action(observation, explore=False)
         action = postprocessor(action)
 
         action_transition = {"action": action}

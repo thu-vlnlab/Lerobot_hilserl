@@ -133,6 +133,8 @@ class SACConfig(PreTrainedConfig):
     shared_encoder: bool = True
     # Number of discrete actions, eg for gripper actions
     num_discrete_actions: int | None = None
+    # Epsilon for discrete action exploration (epsilon-greedy)
+    discrete_action_epsilon: float = 0.1
     # Dimension of the image embedding pooling
     image_embedding_pooling_dim: int = 8
 
