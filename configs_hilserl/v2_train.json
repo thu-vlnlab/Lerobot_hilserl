@@ -1,0 +1,100 @@
+{
+  "batch_size": 64,
+  "save_checkpoint": true,
+  "save_freq": 1000,
+  "policy": {
+    "type": "sac",
+    "push_to_hub": false,
+    "device": "cuda",
+    "temperature_init": 0.01,
+    "discount": 0.99,
+    "critic_target_update_weight": 0.005,
+    "actor_lr": 3e-4,
+    "critic_lr": 3e-4,
+    "temperature_lr": 3e-4,
+    "utd_ratio": 20,
+    "storage_device": "cuda",
+    "online_buffer_capacity": 10000,
+    "offline_buffer_capacity": 3000,
+    "num_discrete_actions": 3,
+    "discrete_action_epsilon": 0.1,
+    "actor_learner_config": {
+      "policy_parameters_push_frequency": 2,
+      "learner_host": "localhost",
+      "learner_port": 50051
+    },
+    "input_features": {
+      "observation.images.front": {
+        "type": "VISUAL",
+        "shape": [3, 128, 128]
+      },
+      "observation.state": {
+        "type": "STATE",
+        "shape": [18]
+      }
+    },
+    "output_features": {
+      "action": {
+        "type": "ACTION",
+        "shape": [4]
+      }
+    }
+  },
+  "env": {
+    "type": "gym_manipulator",
+    "name": "gym_hil",
+    "fps": 10,
+    "task": "PandaPickCubeGamepad-v0",
+    "features": {
+      "action": {
+        "type": "ACTION",
+        "shape": [4]
+      },
+      "observation.images.front": {
+        "type": "VISUAL",
+        "shape": [3, 128, 128]
+      },
+      "observation.state": {
+        "type": "STATE",
+        "shape": [18]
+      }
+    },
+    "features_map": {
+      "action": "action",
+      "observation.images.front": "observation.images.front",
+      "observation.state": "observation.state"
+    },
+    "processor": {
+      "control_mode": "gamepad",
+      "observation": null,
+      "image_preprocessing": {
+        "crop_params_dict": {},
+        "resize_size": [128, 128]
+      },
+      "gripper": {
+        "use_gripper": true,
+        "gripper_penalty": 0
+      },
+      "reset": {
+        "fixed_reset_joint_positions": null,
+        "reset_time_s": 5.0,
+        "control_time_s": 15.0,
+        "terminate_on_success": true
+      },
+      "inverse_kinematics": null,
+      "reward_classifier": {
+        "pretrained_path": "/home/qzl/data/Lerobot_hilserl/outputs/train/2026-01-09/17-29-37_reward_classifier/checkpoints/003000",
+        "success_threshold": 0.5,
+        "success_reward": 1.0
+      },
+      "max_gripper_pos": null
+    },
+    "robot": null,
+    "teleop": null
+  },
+  "dataset": null,
+  "wandb": {
+    "enable": true,
+    "project": "push-cube-v2"
+  }
+}

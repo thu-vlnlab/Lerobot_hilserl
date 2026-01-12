@@ -1,0 +1,26 @@
+{
+  "env": {
+    "name": "gym_hil",
+    "task": "PandaPickCubeGamepad-v0",
+    "fps": 10,
+    "processor": {
+      "control_mode": "gamepad",
+      "gripper": {
+        "use_gripper": true
+      },
+      "reset": {
+        "control_time_s": 15.0,
+        "terminate_on_success": false
+      }
+    }
+  },
+  "dataset": {
+    "repo_id": "local/push_cube_v2",
+    "root": "/home/qzl/data/push_cube_v2",
+    "task": "push_cube",
+    "num_episodes_to_record": 50,
+    "push_to_hub": false
+  },
+  "mode": "record",
+  "device": "cuda"
+}

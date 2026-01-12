@@ -328,8 +328,8 @@ def add_actor_information_and_train(
 
     replay_buffer = initialize_replay_buffer(cfg, device, storage_device)
     batch_size = cfg.batch_size
-    offline_replay_buffer = None
 
+    # 始终创建 offline buffer（用于存储人类干预数据）
     if cfg.dataset is not None:
         offline_replay_buffer = initialize_offline_replay_buffer(
             cfg=cfg,
@@ -337,6 +337,15 @@ def add_actor_information_and_train(
             storage_device=storage_device,
         )
         batch_size: int = batch_size // 2  # We will sample from both replay buffer
+    else:
+        # 创建空的 offline buffer，用于存储人类干预数据
+        offline_replay_buffer = ReplayBuffer(
+            capacity=cfg.policy.offline_buffer_capacity,
+            device=device,
+            state_keys=cfg.policy.input_features.keys(),
+            storage_device=storage_device,
+            optimize_memory=True,
+        )
 
     logging.info("Starting learner thread")
     interaction_message = None
@@ -395,7 +404,8 @@ def add_actor_information_and_train(
             # Sample from the iterators
             batch = next(online_iterator)
 
-            if dataset_repo_id is not None:
+            # 当 offline buffer 有数据时，从两个 buffer 采样并合并
+            if offline_replay_buffer is not None and len(offline_replay_buffer) > 0:
                 batch_offline = next(offline_iterator)
                 batch = concatenate_batch_transitions(
                     left_batch_transitions=batch, right_batch_transition=batch_offline
@@ -453,7 +463,8 @@ def add_actor_information_and_train(
         # Sample for the last update in the UTD ratio
         batch = next(online_iterator)
 
-        if dataset_repo_id is not None:
+        # 当 offline buffer 有数据时，从两个 buffer 采样并合并
+        if offline_replay_buffer is not None and len(offline_replay_buffer) > 0:
             batch_offline = next(offline_iterator)
             batch = concatenate_batch_transitions(
                 left_batch_transitions=batch, right_batch_transition=batch_offline
@@ -1163,10 +1174,11 @@ def process_transitions(
             replay_buffer.add(**transition)
 
             # Add to offline buffer if it's an intervention
-            if dataset_repo_id is not None and transition.get("complementary_info", {}).get(
-                TeleopEvents.IS_INTERVENTION
-            ):
+            # 改为检查 offline_replay_buffer 而不是 dataset_repo_id，这样即使 dataset: null 也能存储干预数据
+            is_intervention = transition.get("complementary_info", {}).get(TeleopEvents.IS_INTERVENTION)
+            if offline_replay_buffer is not None and is_intervention:
                 offline_replay_buffer.add(**transition)
+                logging.info(f"[LEARNER] Intervention recorded, offline_buffer_size: {len(offline_replay_buffer)}")
 
 
 def process_interaction_messages(
