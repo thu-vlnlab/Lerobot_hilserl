@@ -23,7 +23,7 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from lerobot.cameras import opencv  # noqa: F401
+from lerobot.cameras import opencv, realsense  # noqa: F401
 from lerobot.configs import parser
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.envs.configs import HILSerlRobotEnvConfig
@@ -56,6 +56,7 @@ from lerobot.robots import (  # noqa: F401
     RobotConfig,
     make_robot_from_config,
     so100_follower,
+    piper_follower,
 )
 from lerobot.robots.robot import Robot
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
@@ -104,17 +105,33 @@ class GymManipulatorConfig:
 
 def reset_follower_position(robot_arm: Robot, target_position: np.ndarray) -> None:
     """Reset robot arm to target position using smooth trajectory."""
-    current_position_dict = robot_arm.bus.sync_read("Present_Position")
-    current_position = np.array(
-        [current_position_dict[name] for name in current_position_dict], dtype=np.float32
-    )
-    trajectory = torch.from_numpy(
-        np.linspace(current_position, target_position, 50)
-    )  # NOTE: 30 is just an arbitrary number
-    for pose in trajectory:
-        action_dict = dict(zip(current_position_dict, pose, strict=False))
-        robot_arm.bus.sync_write("Goal_Position", action_dict)
-        precise_sleep(0.015)
+    # For bus-based robots (SO100, Koch, etc.)
+    if hasattr(robot_arm, 'bus') and hasattr(robot_arm.bus, 'sync_read'):
+        current_position_dict = robot_arm.bus.sync_read("Present_Position")
+        current_position = np.array(
+            [current_position_dict[name] for name in current_position_dict], dtype=np.float32
+        )
+        trajectory = torch.from_numpy(
+            np.linspace(current_position, target_position, 50)
+        )
+        for pose in trajectory:
+            action_dict = dict(zip(current_position_dict, pose, strict=False))
+            robot_arm.bus.sync_write("Goal_Position", action_dict)
+            precise_sleep(0.015)
+    # For direct control robots (Piper, etc.)
+    elif hasattr(robot_arm, 'JOINT_NAMES'):
+        obs = robot_arm.get_observation()
+        joint_names = list(robot_arm.JOINT_NAMES) + ['gripper']
+        current_position = np.array(
+            [obs.get(f"{name}.pos", 0) for name in joint_names], dtype=np.float32
+        )
+        trajectory = np.linspace(current_position, target_position, 50)
+        for pose in trajectory:
+            action_dict = {f"{name}.pos": float(pose[i]) for i, name in enumerate(joint_names)}
+            robot_arm.send_action(action_dict)
+            precise_sleep(0.015)
+    else:
+        logging.warning("reset_follower_position: Unknown robot type, skipping reset")
 
 
 class RobotEnv(gym.Env):
@@ -150,15 +167,23 @@ class RobotEnv(gym.Env):
         self.current_step = 0
         self.episode_data = None
 
-        self._joint_names = [f"{key}.pos" for key in self.robot.bus.motors]
+        # Get joint names - support both bus-based robots (SO100) and direct robots (Piper)
+        if hasattr(self.robot, 'bus') and hasattr(self.robot.bus, 'motors'):
+            self._joint_names = list(self.robot.bus.motors.keys())
+        elif hasattr(self.robot, 'JOINT_NAMES'):
+            # Piper and similar robots
+            self._joint_names = list(self.robot.JOINT_NAMES)
+        else:
+            # Fallback: extract from action_features
+            self._joint_names = [k.replace('.pos', '') for k in self.robot.action_features.keys()
+                                if k.endswith('.pos') and 'gripper' not in k]
+
         self._image_keys = self.robot.cameras.keys()
 
         self.reset_pose = reset_pose
         self.reset_time_s = reset_time_s
 
         self.use_gripper = use_gripper
-
-        self._joint_names = list(self.robot.bus.motors.keys())
         self._raw_joint_positions = None
 
         self._setup_spaces()
@@ -251,7 +276,7 @@ class RobotEnv(gym.Env):
 
     def step(self, action) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         """Execute one environment step with given action."""
-        joint_targets_dict = {f"{key}.pos": action[i] for i, key in enumerate(self.robot.bus.motors.keys())}
+        joint_targets_dict = {f"{key}.pos": action[i] for i, key in enumerate(self._joint_names)}
 
         self.robot.send_action(joint_targets_dict)
 
@@ -392,7 +417,13 @@ def make_processors(
 
     # Full processor pipeline for real robot environment
     # Get robot and motor information for kinematics
-    motor_names = list(env.robot.bus.motors.keys())
+    if hasattr(env.robot, 'bus') and hasattr(env.robot.bus, 'motors'):
+        motor_names = list(env.robot.bus.motors.keys())
+    elif hasattr(env.robot, 'JOINT_NAMES'):
+        motor_names = list(env.robot.JOINT_NAMES)
+    else:
+        motor_names = [k.replace('.pos', '') for k in env.robot.action_features.keys()
+                      if k.endswith('.pos') and 'gripper' not in k]
 
     # Set up kinematics solver if inverse kinematics is configured
     kinematics_solver = None
