@@ -38,8 +38,8 @@ class PiperFollowerConfig(RobotConfig):
     # Whether to auto-initialize CAN on startup
     can_auto_init: bool = True
 
-    # Disable torque when disconnecting
-    disable_torque_on_disconnect: bool = True
+    # Disable torque when disconnecting (False = keep holding position, safer)
+    disable_torque_on_disconnect: bool = False
 
     # Use degrees for joint positions (if False, uses normalized range -100 to 100)
     use_degrees: bool = True

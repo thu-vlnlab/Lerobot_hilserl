@@ -43,6 +43,7 @@ from lerobot.processor import (
     MapTensorToDeltaActionDictStep,
     MotorCurrentProcessorStep,
     Numpy2TorchActionProcessorStep,
+    PiperDeltaToAbsoluteEEStep,
     RewardClassifierProcessorStep,
     RobotActionToPolicyActionProcessorStep,
     TimeLimitProcessorStep,
@@ -118,18 +119,42 @@ def reset_follower_position(robot_arm: Robot, target_position: np.ndarray) -> No
             action_dict = dict(zip(current_position_dict, pose, strict=False))
             robot_arm.bus.sync_write("Goal_Position", action_dict)
             precise_sleep(0.015)
-    # For direct control robots (Piper, etc.)
-    elif hasattr(robot_arm, 'JOINT_NAMES'):
+    # For Piper robots - use direct joint control for reset
+    elif hasattr(robot_arm, 'JOINT_NAMES') and hasattr(robot_arm, '_piper'):
         obs = robot_arm.get_observation()
-        joint_names = list(robot_arm.JOINT_NAMES) + ['gripper']
+        joint_names = list(robot_arm.JOINT_NAMES)
         current_position = np.array(
             [obs.get(f"{name}.pos", 0) for name in joint_names], dtype=np.float32
         )
-        trajectory = np.linspace(current_position, target_position, 50)
+        # target_position has 7 values: 6 joints + gripper
+        target_joints = target_position[:6]
+        target_gripper = target_position[6] if len(target_position) > 6 else 35.0
+
+        trajectory = np.linspace(current_position, target_joints, 50)
+
+        # Set to joint control mode
+        robot_arm._piper.MotionCtrl_2(0x01, 0x01, 30, 0x00)
+        precise_sleep(0.1)
+
         for pose in trajectory:
-            action_dict = {f"{name}.pos": float(pose[i]) for i, name in enumerate(joint_names)}
-            robot_arm.send_action(action_dict)
-            precise_sleep(0.015)
+            # Convert degrees to 0.001 degrees for SDK
+            joints_milli = [int(p * 1000) for p in pose]
+            robot_arm._piper.JointCtrl(
+                joint_1=joints_milli[0],
+                joint_2=joints_milli[1],
+                joint_3=joints_milli[2],
+                joint_4=joints_milli[3],
+                joint_5=joints_milli[4],
+                joint_6=joints_milli[5],
+            )
+            precise_sleep(0.02)
+
+        # Set gripper
+        gripper_milli = int(target_gripper * 1000)
+        robot_arm._piper.GripperCtrl(gripper_milli, 1000, 0x01, 0)
+
+        # Switch back to end-effector control mode if needed
+        robot_arm._piper.MotionCtrl_2(0x01, 0x00, 50, 0x00)
     else:
         logging.warning("reset_follower_position: Unknown robot type, skipping reset")
 
@@ -196,7 +221,14 @@ class RobotEnv(gym.Env):
 
         images = {key: obs_dict[key] for key in self._image_keys}
 
-        return {"agent_pos": joint_positions, "pixels": images, **raw_joint_joint_position}
+        result = {"agent_pos": joint_positions, "pixels": images, **raw_joint_joint_position}
+
+        # Include EE position if available (for Piper EE control)
+        for key in ["ee.x", "ee.y", "ee.z", "ee.rx", "ee.ry", "ee.rz", "gripper.pos"]:
+            if key in obs_dict:
+                result[key] = obs_dict[key]
+
+        return result
 
     def _setup_spaces(self) -> None:
         """Configure observation and action spaces based on robot capabilities."""
@@ -276,6 +308,12 @@ class RobotEnv(gym.Env):
 
     def step(self, action) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         """Execute one environment step with given action."""
+        # Convert tensor to numpy if needed
+        if hasattr(action, 'numpy'):
+            action = action.numpy()
+        elif hasattr(action, 'cpu'):
+            action = action.cpu().numpy()
+
         # Check if robot uses end-effector control (e.g., PiperFollowerEndEffector)
         if "ee.x" in self.robot.action_features:
             # End-effector control: action is [x, y, z, gripper] or similar
@@ -506,6 +544,19 @@ def make_processors(
         ),
     ]
 
+    # Check if robot uses end-effector control (e.g., PiperFollowerEndEffector)
+    uses_ee_control = hasattr(env.robot, 'action_features') and "ee.x" in env.robot.action_features
+
+    # For Piper with end-effector control and no IK, add delta to absolute converter
+    if uses_ee_control and cfg.processor.inverse_kinematics is None:
+        max_gripper = cfg.processor.max_gripper_pos if cfg.processor.max_gripper_pos else 70.0
+        action_pipeline_steps.append(
+            PiperDeltaToAbsoluteEEStep(
+                ee_step_size=0.02,  # 2cm per delta unit
+                max_gripper_pos=max_gripper,
+            )
+        )
+
     # Replace InverseKinematicsProcessor with new kinematic processors
     if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
         # Add EE bounds and safety processor
@@ -566,9 +617,25 @@ def step_env_and_process_transition(
 
     # Create action transition
     transition[TransitionKey.ACTION] = action
-    transition[TransitionKey.OBSERVATION] = (
-        env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
-    )
+
+    # Get observation for action processor
+    # For Piper EE control, we need the full observation including ee.x, ee.y, ee.z
+    if hasattr(env, "_get_observation"):
+        current_obs = env._get_observation()
+        # Include both raw joint positions and EE positions
+        obs_for_action = {}
+        if hasattr(env, "get_raw_joint_positions"):
+            obs_for_action.update(env.get_raw_joint_positions())
+        # Add EE positions if available
+        for key in ["ee.x", "ee.y", "ee.z", "gripper.pos"]:
+            if key in current_obs:
+                obs_for_action[key] = current_obs[key]
+        transition[TransitionKey.OBSERVATION] = obs_for_action
+    else:
+        transition[TransitionKey.OBSERVATION] = (
+            env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
+        )
+
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
 
@@ -593,6 +660,247 @@ def step_env_and_process_transition(
     new_transition = env_processor(new_transition)
 
     return new_transition
+
+
+def piper_control_loop(
+    env: gym.Env,
+    env_processor: DataProcessorPipeline[EnvTransition, EnvTransition],
+    teleop_device: Teleoperator,
+    cfg: GymManipulatorConfig,
+) -> None:
+    """
+    Direct control loop for Piper robot - bypasses complex processor pipeline.
+    Similar to test_piper_gamepad_control.py for reliable control.
+    """
+    dt = 1.0 / cfg.env.fps
+    LINEAR_VELOCITY_SCALE = 50.0  # mm/s per unit delta
+    GRIPPER_STEP = 5.0  # mm per step
+
+    print(f"Starting Piper control loop at {cfg.env.fps} FPS")
+    print("Controls:")
+    print("  [IMPORTANT] Hold LB button to enable control!")
+    print("  Left stick Y: X direction (forward/backward)")
+    print("  Left stick X: Y direction (left/right)")
+    print("  Right stick Y: Z direction (up/down)")
+    print("  Y button: End episode with SUCCESS")
+    print("  A button: End episode with FAILURE")
+    print("  X button: Rerecord episode")
+    print("  Press Ctrl+C to exit")
+
+    # Get direct access to Piper robot
+    robot = env.robot
+    piper = robot._piper
+
+    # Reset environment
+    obs, info = env.reset()
+    env_processor.reset()
+
+    # Read current EE position from robot
+    end_pose = piper.GetArmEndPoseMsgs()
+    current_pose = [
+        end_pose.end_pose.X_axis / 1000.0,  # 0.001mm -> mm
+        end_pose.end_pose.Y_axis / 1000.0,
+        end_pose.end_pose.Z_axis / 1000.0,
+        end_pose.end_pose.RX_axis / 1000.0,  # 0.001deg -> deg
+        end_pose.end_pose.RY_axis / 1000.0,
+        end_pose.end_pose.RZ_axis / 1000.0,
+    ]
+    gripper_pos = 35.0  # mm
+
+    print(f"Initial EE position: X={current_pose[0]:.1f}mm Y={current_pose[1]:.1f}mm Z={current_pose[2]:.1f}mm")
+
+    # Process initial observation
+    transition = create_transition(observation=obs, info=info)
+    transition = env_processor(data=transition)
+
+    # Determine if gripper is used
+    use_gripper = cfg.env.processor.gripper.use_gripper if cfg.env.processor.gripper is not None else True
+
+    # Setup dataset if recording
+    dataset = None
+    if cfg.mode == "record":
+        action_features = teleop_device.action_features if teleop_device else {
+            "dtype": "float32", "shape": (4,), "names": None
+        }
+        features = {
+            ACTION: action_features,
+            REWARD: {"dtype": "float32", "shape": (1,), "names": None},
+            DONE: {"dtype": "bool", "shape": (1,), "names": None},
+        }
+        if use_gripper:
+            features["complementary_info.discrete_penalty"] = {
+                "dtype": "float32", "shape": (1,), "names": ["discrete_penalty"],
+            }
+        for key, value in transition[TransitionKey.OBSERVATION].items():
+            if key == OBS_STATE:
+                features[key] = {"dtype": "float32", "shape": value.squeeze(0).shape, "names": None}
+            if "image" in key:
+                features[key] = {"dtype": "video", "shape": value.squeeze(0).shape, "names": ["channels", "height", "width"]}
+
+        dataset = LeRobotDataset.create(
+            cfg.dataset.repo_id, cfg.env.fps, root=cfg.dataset.root,
+            use_videos=True, image_writer_threads=4, image_writer_processes=0, features=features,
+        )
+
+    episode_idx = 0
+    episode_step = 0
+    episode_start_time = time.perf_counter()
+
+    try:
+        while episode_idx < cfg.dataset.num_episodes_to_record:
+            step_start_time = time.perf_counter()
+
+            # Get teleop input directly
+            teleop_action = teleop_device.get_action()
+            teleop_events = teleop_device.get_teleop_events()
+
+            is_intervention = teleop_events.get(TeleopEvents.IS_INTERVENTION, False)
+            success = teleop_events.get(TeleopEvents.SUCCESS, False)
+            failure = teleop_events.get(TeleopEvents.TERMINATE_EPISODE, False)
+            rerecord = teleop_events.get(TeleopEvents.RERECORD_EPISODE, False)
+
+            # Control robot directly when intervention is active
+            if is_intervention:
+                # Get delta from teleop
+                delta_x = teleop_action.get("delta_x", 0.0)
+                delta_y = teleop_action.get("delta_y", 0.0)
+                delta_z = teleop_action.get("delta_z", 0.0)
+
+                # Calculate velocity and update position
+                vel_x = delta_x * LINEAR_VELOCITY_SCALE
+                vel_y = delta_y * LINEAR_VELOCITY_SCALE
+                vel_z = delta_z * LINEAR_VELOCITY_SCALE
+
+                current_pose[0] += vel_x * dt
+                current_pose[1] += vel_y * dt
+                current_pose[2] += vel_z * dt
+
+                # Send command to robot
+                X = int(current_pose[0] * 1000)
+                Y = int(current_pose[1] * 1000)
+                Z = int(current_pose[2] * 1000)
+                RX = int(current_pose[3] * 1000)
+                RY = int(current_pose[4] * 1000)
+                RZ = int(current_pose[5] * 1000)
+
+                piper.MotionCtrl_2(0x01, 0x00, 50, 0x00)
+                piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
+
+                if episode_step % 10 == 0:
+                    print(f"\r[控制中] Step {episode_step} X={current_pose[0]:.1f} Y={current_pose[1]:.1f} Z={current_pose[2]:.1f}   ", end="")
+            else:
+                # Read current position to stay in sync
+                end_pose = piper.GetArmEndPoseMsgs()
+                current_pose = [
+                    end_pose.end_pose.X_axis / 1000.0,
+                    end_pose.end_pose.Y_axis / 1000.0,
+                    end_pose.end_pose.Z_axis / 1000.0,
+                    end_pose.end_pose.RX_axis / 1000.0,
+                    end_pose.end_pose.RY_axis / 1000.0,
+                    end_pose.end_pose.RZ_axis / 1000.0,
+                ]
+                if episode_step % 10 == 0:
+                    print(f"\r[等待LB] Step {episode_step} X={current_pose[0]:.1f} Y={current_pose[1]:.1f} Z={current_pose[2]:.1f}   ", end="")
+
+            # Handle gripper
+            gripper_action = teleop_action.get("gripper", 1)
+            if gripper_action == 0:  # Close
+                gripper_pos = max(0.0, gripper_pos - GRIPPER_STEP)
+                piper.GripperCtrl(int(gripper_pos * 1000), 1000, 0x01, 0)
+            elif gripper_action == 2:  # Open
+                gripper_pos = min(70.0, gripper_pos + GRIPPER_STEP)
+                piper.GripperCtrl(int(gripper_pos * 1000), 1000, 0x01, 0)
+
+            # Get observation for recording
+            obs = env._get_observation()
+
+            # Record frame
+            if cfg.mode == "record" and dataset is not None:
+                # Process observation through env_processor for correct format
+                temp_transition = create_transition(observation=obs, info={})
+                temp_transition = env_processor(temp_transition)
+
+                observations = {
+                    k: v.squeeze(0).cpu()
+                    for k, v in temp_transition[TransitionKey.OBSERVATION].items()
+                    if isinstance(v, torch.Tensor)
+                }
+
+                action_to_record = torch.tensor([
+                    teleop_action.get("delta_x", 0.0),
+                    teleop_action.get("delta_y", 0.0),
+                    teleop_action.get("delta_z", 0.0),
+                    float(teleop_action.get("gripper", 1)),
+                ], dtype=torch.float32)
+
+                frame = {
+                    **observations,
+                    ACTION: action_to_record,
+                    REWARD: np.array([float(success)], dtype=np.float32),
+                    DONE: np.array([success or failure or rerecord], dtype=bool),
+                }
+                if use_gripper:
+                    frame["complementary_info.discrete_penalty"] = np.array([0.0], dtype=np.float32)
+                frame["task"] = cfg.dataset.task
+                dataset.add_frame(frame)
+
+            episode_step += 1
+
+            # Handle episode termination
+            # terminate_on_success controls whether success ends the episode
+            terminate_on_success = cfg.env.processor.reset.terminate_on_success if cfg.env.processor.reset else True
+            terminated = failure or rerecord or (success and terminate_on_success)
+
+            if terminated:
+                print(f"\n[INFO] Episode ended: success={success}, failure={failure}, rerecord={rerecord}")
+                episode_time = time.perf_counter() - episode_start_time
+                logging.info(f"Episode ended after {episode_step} steps in {episode_time:.1f}s")
+
+                if dataset is not None:
+                    if rerecord:
+                        logging.info(f"Re-recording episode {episode_idx}")
+                        dataset.clear_episode_buffer()
+                    else:
+                        episode_idx += 1
+                        logging.info(f"Saving episode {episode_idx}")
+                        dataset.save_episode()
+
+                episode_step = 0
+                episode_start_time = time.perf_counter()
+
+                # Reset environment
+                obs, info = env.reset()
+                env_processor.reset()
+
+                # Re-read current position
+                end_pose = piper.GetArmEndPoseMsgs()
+                current_pose = [
+                    end_pose.end_pose.X_axis / 1000.0,
+                    end_pose.end_pose.Y_axis / 1000.0,
+                    end_pose.end_pose.Z_axis / 1000.0,
+                    end_pose.end_pose.RX_axis / 1000.0,
+                    end_pose.end_pose.RY_axis / 1000.0,
+                    end_pose.end_pose.RZ_axis / 1000.0,
+                ]
+
+            # Maintain fps timing
+            precise_sleep(dt - (time.perf_counter() - step_start_time))
+
+    except KeyboardInterrupt:
+        print("\n\n[INFO] 退出控制，保持当前位置...")
+        # Keep current position
+        X = int(current_pose[0] * 1000)
+        Y = int(current_pose[1] * 1000)
+        Z = int(current_pose[2] * 1000)
+        RX = int(current_pose[3] * 1000)
+        RY = int(current_pose[4] * 1000)
+        RZ = int(current_pose[5] * 1000)
+        piper.MotionCtrl_2(0x01, 0x00, 10, 0x00)
+        piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
+
+    if dataset is not None and cfg.dataset.push_to_hub:
+        logging.info("Pushing dataset to hub")
+        dataset.push_to_hub()
 
 
 def control_loop(
@@ -814,7 +1122,13 @@ def main(cfg: GymManipulatorConfig) -> None:
         replay_trajectory(env, action_processor, cfg)
         exit()
 
-    control_loop(env, env_processor, action_processor, teleop_device, cfg)
+    # Use Piper-specific control loop for Piper robots
+    is_piper = hasattr(env, 'robot') and hasattr(env.robot, '_piper')
+    if is_piper:
+        print("\n[INFO] Detected Piper robot, using direct control loop")
+        piper_control_loop(env, env_processor, teleop_device, cfg)
+    else:
+        control_loop(env, env_processor, action_processor, teleop_device, cfg)
 
 
 if __name__ == "__main__":

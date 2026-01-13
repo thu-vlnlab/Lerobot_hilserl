@@ -70,6 +70,7 @@ from .pipeline import (
     RobotProcessorPipeline,
     TruncatedProcessorStep,
 )
+from .piper_ee_processor import PiperDeltaToAbsoluteEEStep
 from .policy_robot_bridge import (
     PolicyActionToRobotActionProcessorStep,
     RobotActionToPolicyActionProcessorStep,
@@ -105,6 +106,7 @@ __all__ = [
     "NormalizerProcessorStep",
     "Numpy2TorchActionProcessorStep",
     "ObservationProcessorStep",
+    "PiperDeltaToAbsoluteEEStep",
     "PolicyAction",
     "PolicyActionProcessorStep",
     "PolicyProcessorPipeline",

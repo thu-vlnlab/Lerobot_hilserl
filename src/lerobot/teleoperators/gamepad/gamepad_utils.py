@@ -221,12 +221,14 @@ class GamepadController(InputController):
         logging.info(f"Initialized gamepad: {self.joystick.get_name()}")
 
         print("Gamepad controls:")
-        print("  Left analog stick: Move in X-Y plane")
-        print("  Right analog stick (vertical): Move in Z axis")
-        print("  B/Circle button: Exit")
-        print("  Y/Triangle button: End episode with SUCCESS")
-        print("  A/Cross button: End episode with FAILURE")
-        print("  X/Square button: Rerecord episode")
+        print("  [IMPORTANT] Hold LB button to enable control!")
+        print("  Left analog stick Y: Move in X direction (forward/backward)")
+        print("  Left analog stick X: Move in Y direction (left/right)")
+        print("  Right analog stick Y: Move in Z direction (up/down)")
+        print("  Y button: End episode with SUCCESS")
+        print("  A button: End episode with FAILURE")
+        print("  X button: Rerecord episode")
+        print("  RB/LT: Gripper control")
 
     def stop(self):
         """Clean up pygame resources."""
@@ -272,8 +274,9 @@ class GamepadController(InputController):
                 elif event.button == 7:
                     self.open_gripper_command = False
 
-            # Check for RB button (typically button 5) for intervention flag
-            if self.joystick.get_button(5):
+            # Check for LB button (button 4) for intervention flag
+            # This matches the user's control script behavior
+            if self.joystick.get_button(4):
                 self.intervention_flag = True
             else:
                 self.intervention_flag = False
@@ -283,23 +286,26 @@ class GamepadController(InputController):
         import pygame
 
         try:
-            # Read joystick axes
-            # Left stick X and Y (typically axes 0 and 1)
-            y_input = self.joystick.get_axis(0)  # Up/Down (often inverted)
-            x_input = self.joystick.get_axis(1)  # Left/Right
-
-            # Right stick Y (typically axis 3 or 4)
-            z_input = self.joystick.get_axis(3)  # Up/Down for Z
+            # Read joystick axes - Xbox Series X Controller layout:
+            # axis 0 = Left stick X (left/right)
+            # axis 1 = Left stick Y (up/down, inverted)
+            # axis 4 = Right stick Y (up/down for Z, inverted)
+            left_x = self.joystick.get_axis(0)   # Left/Right -> Y direction
+            left_y = self.joystick.get_axis(1)   # Up/Down -> X direction
+            right_y = self.joystick.get_axis(4)  # Up/Down -> Z direction
 
             # Apply deadzone to avoid drift
-            x_input = 0 if abs(x_input) < self.deadzone else x_input
-            y_input = 0 if abs(y_input) < self.deadzone else y_input
-            z_input = 0 if abs(z_input) < self.deadzone else z_input
+            left_x = 0 if abs(left_x) < self.deadzone else left_x
+            left_y = 0 if abs(left_y) < self.deadzone else left_y
+            right_y = 0 if abs(right_y) < self.deadzone else right_y
 
-            # Calculate deltas (note: may need to invert axes depending on controller)
-            delta_x = -x_input * self.x_step_size  # Forward/backward
-            delta_y = -y_input * self.y_step_size  # Left/right
-            delta_z = -z_input * self.z_step_size  # Up/down
+            # Calculate deltas matching user's control script:
+            # left_y -> X (forward/backward), inverted
+            # left_x -> Y (left/right)
+            # right_y -> Z (up/down), inverted
+            delta_x = -left_y * self.x_step_size   # Forward/backward
+            delta_y = left_x * self.y_step_size    # Left/right
+            delta_z = -right_y * self.z_step_size  # Up/down
 
             return delta_x, delta_y, delta_z
 
