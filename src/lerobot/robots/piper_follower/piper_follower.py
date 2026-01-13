@@ -382,3 +382,69 @@ class PiperFollowerEndEffector(PiperFollower):
                 obs_dict["ee.rz"] = fk[0][5]
 
         return obs_dict
+
+    @cached_property
+    def action_features(self) -> dict[str, type]:
+        """Action space for end-effector control: x, y, z + gripper."""
+        return {
+            "ee.x": float,
+            "ee.y": float,
+            "ee.z": float,
+            "gripper.pos": float,
+        }
+
+    def send_action(self, action: dict[str, Any]) -> dict[str, Any]:
+        """
+        Send end-effector pose control command.
+
+        Args:
+            action: Dictionary containing target ee position (x, y, z) and gripper.
+                   x, y, z in meters, gripper in mm.
+
+        Returns:
+            The action actually sent.
+        """
+        if not self.is_connected:
+            raise DeviceNotConnectedError(f"{self} is not connected.")
+
+        # Get current end-effector pose to fill in missing values
+        current_obs = self.get_observation()
+
+        # Extract target position (convert meters to mm for SDK)
+        target_x = action.get("ee.x", current_obs.get("ee.x", 0.3)) * 1000  # m to mm
+        target_y = action.get("ee.y", current_obs.get("ee.y", 0.0)) * 1000
+        target_z = action.get("ee.z", current_obs.get("ee.z", 0.2)) * 1000
+
+        # Keep current orientation (or use provided)
+        target_rx = action.get("ee.rx", current_obs.get("ee.rx", 0.0))
+        target_ry = action.get("ee.ry", current_obs.get("ee.ry", 0.0))
+        target_rz = action.get("ee.rz", current_obs.get("ee.rz", 0.0))
+
+        # Convert to SDK units (0.001 mm and 0.001 degrees)
+        X = int(target_x * 1000)
+        Y = int(target_y * 1000)
+        Z = int(target_z * 1000)
+        RX = int(target_rx * 1000)
+        RY = int(target_ry * 1000)
+        RZ = int(target_rz * 1000)
+
+        # Set motion mode to end-effector control
+        self._piper.MotionCtrl_2(0x01, 0x00, 50, 0x00)
+
+        # Send end-effector pose command
+        self._piper.EndPoseCtrl(X, Y, Z, RX, RY, RZ)
+
+        # Handle gripper if provided
+        gripper_goal = action.get("gripper.pos", None)
+        if gripper_goal is not None:
+            gripper_mm = gripper_goal
+            if not self.config.use_degrees:
+                gripper_mm = gripper_goal / 100.0 * self.config.gripper_max_mm
+            gripper_milli = int(gripper_mm * 1000)
+            self._piper.GripperCtrl(
+                gripper_angle=gripper_milli,
+                gripper_effort=self.config.gripper_effort,
+                gripper_code=0x01,
+            )
+
+        return action

@@ -276,9 +276,16 @@ class RobotEnv(gym.Env):
 
     def step(self, action) -> tuple[dict[str, np.ndarray], float, bool, bool, dict[str, Any]]:
         """Execute one environment step with given action."""
-        joint_targets_dict = {f"{key}.pos": action[i] for i, key in enumerate(self._joint_names)}
+        # Check if robot uses end-effector control (e.g., PiperFollowerEndEffector)
+        if "ee.x" in self.robot.action_features:
+            # End-effector control: action is [x, y, z, gripper] or similar
+            action_keys = list(self.robot.action_features.keys())
+            action_dict = {key: float(action[i]) for i, key in enumerate(action_keys) if i < len(action)}
+        else:
+            # Joint control: action is joint positions
+            action_dict = {f"{key}.pos": action[i] for i, key in enumerate(self._joint_names)}
 
-        self.robot.send_action(joint_targets_dict)
+        self.robot.send_action(action_dict)
 
         obs = self._get_observation()
 

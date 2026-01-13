@@ -33,7 +33,7 @@
       "max_gripper_pos": 70.0
     },
     "robot": {
-      "type": "piper_follower",
+      "type": "piper_follower_ee",
       "can_name": "can0",
       "id": "piper_arm",
       "use_degrees": true,
