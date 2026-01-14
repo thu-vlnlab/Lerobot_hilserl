@@ -705,7 +705,7 @@ def piper_control_loop(
         end_pose.end_pose.RY_axis / 1000.0,
         end_pose.end_pose.RZ_axis / 1000.0,
     ]
-    gripper_pos = 35.0  # mm
+    gripper_pos = 0.0  # mm
 
     print(f"Initial EE position: X={current_pose[0]:.1f}mm Y={current_pose[1]:.1f}mm Z={current_pose[2]:.1f}mm")
 
@@ -745,6 +745,7 @@ def piper_control_loop(
     episode_idx = 0
     episode_step = 0
     episode_start_time = time.perf_counter()
+    success_locked = False  # Lock success state once Y is pressed
 
     try:
         while episode_idx < cfg.dataset.num_episodes_to_record:
@@ -758,6 +759,10 @@ def piper_control_loop(
             success = teleop_events.get(TeleopEvents.SUCCESS, False)
             failure = teleop_events.get(TeleopEvents.TERMINATE_EPISODE, False)
             rerecord = teleop_events.get(TeleopEvents.RERECORD_EPISODE, False)
+
+            # Lock success state once triggered
+            if success:
+                success_locked = True
 
             # Control robot directly when intervention is active
             if is_intervention:
@@ -836,8 +841,8 @@ def piper_control_loop(
                 frame = {
                     **observations,
                     ACTION: action_to_record,
-                    REWARD: np.array([float(success)], dtype=np.float32),
-                    DONE: np.array([success or failure or rerecord], dtype=bool),
+                    REWARD: np.array([float(success_locked)], dtype=np.float32),
+                    DONE: np.array([success_locked or failure or rerecord], dtype=bool),
                 }
                 if use_gripper:
                     frame["complementary_info.discrete_penalty"] = np.array([0.0], dtype=np.float32)
@@ -849,7 +854,7 @@ def piper_control_loop(
             # Handle episode termination
             # terminate_on_success controls whether success ends the episode
             terminate_on_success = cfg.env.processor.reset.terminate_on_success if cfg.env.processor.reset else True
-            terminated = failure or rerecord or (success and terminate_on_success)
+            terminated = failure or rerecord or (success_locked and terminate_on_success)
 
             if terminated:
                 print(f"\n[INFO] Episode ended: success={success}, failure={failure}, rerecord={rerecord}")
@@ -867,6 +872,7 @@ def piper_control_loop(
 
                 episode_step = 0
                 episode_start_time = time.perf_counter()
+                success_locked = False  # Reset success lock for new episode
 
                 # Reset environment
                 obs, info = env.reset()
