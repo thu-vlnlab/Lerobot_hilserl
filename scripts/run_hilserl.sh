@@ -53,17 +53,22 @@ print_usage() {
     echo "Usage: $0 <command> [options]"
     echo ""
     echo "Commands:"
-    echo "  record [config] - Record demonstration episodes (default env_config_piper.json)"
-    echo "  crop            - Interactive ROI cropping tool"
-    echo "  train-reward [config]  - Train reward classifier (default reward_classifier_config.json)"
-    echo "  train-learner [config] - Start learner (default train_config_hilserl.json)"
-    echo "  train-actor [config]   - Start actor (default train_config_hilserl.json)"
-    echo "  test-robot      - Test robot connection"
+    echo "  setup-can        - Setup CAN interface for Piper robot"
+    echo "  record [config]  - Record demos for reward classifier (terminate_on_success=false)"
+    echo "  record-expert    - Record expert demos (terminate_on_success=true, for offline buffer)"
+    echo "  crop             - Interactive ROI cropping tool"
+    echo "  train-reward [config]  - Train reward classifier"
+    echo "  train-learner [config] - Start learner (terminal 1)"
+    echo "  train-actor [config]   - Start actor (terminal 2)"
+    echo "  test-robot       - Test robot connection"
     echo ""
     echo "Examples:"
-    echo "  $0 record                    # Record 15 demo episodes"
-    echo "  $0 train-learner configs_hilserl/train_config_hilserl.json"
-    echo "  $0 train-actor configs_hilserl/train_config_hilserl_raw.json"
+    echo "  $0 setup-can                 # Setup CAN interface"
+    echo "  $0 record                    # Record for reward classifier training"
+    echo "  $0 record-expert             # Record expert demos (success=terminate)"
+    echo "  $0 train-reward              # Train reward classifier"
+    echo "  $0 train-learner             # Start learner (terminal 1)"
+    echo "  $0 train-actor               # Start actor (terminal 2)"
 }
 
 setup_can() {
@@ -75,9 +80,17 @@ setup_can() {
 
 case "$1" in
     record)
-        echo -e "${GREEN}Starting demonstration recording...${NC}"
-        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/env_config_piper.json" "${@:2}")
-        python -m lerobot.rl.gym_manipulator --config_path "${CONFIG_PATH}"
+        echo -e "${GREEN}Starting demonstration recording (for reward classifier)...${NC}"
+        echo -e "${YELLOW}terminate_on_success=false: continue recording after success${NC}"
+        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/env_config_piper_real.json" "${@:2}")
+        python -m lerobot.rl.gym_manipulator --config "${CONFIG_PATH}"
+        ;;
+
+    record-expert)
+        echo -e "${GREEN}Starting expert demonstration recording...${NC}"
+        echo -e "${YELLOW}terminate_on_success=true: episode ends on success${NC}"
+        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/env_config_piper_expert.json" "${@:2}")
+        python -m lerobot.rl.gym_manipulator --config "${CONFIG_PATH}"
         ;;
 
     crop)
@@ -88,22 +101,22 @@ case "$1" in
 
     train-reward)
         echo -e "${GREEN}Training reward classifier...${NC}"
-        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/reward_classifier_config.json" "${@:2}")
-        python -m lerobot.scripts.lerobot_train --config_path "${CONFIG_PATH}"
+        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/reward_classifier_config_piper.json" "${@:2}")
+        python -m lerobot.scripts.lerobot_train --config "${CONFIG_PATH}"
         ;;
 
     train-learner)
         echo -e "${GREEN}Starting HIL-SERL Learner...${NC}"
         echo -e "${YELLOW}Make sure to start the actor in another terminal!${NC}"
-        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/train_config_hilserl.json" "${@:2}")
-        python -m lerobot.rl.learner --config_path "${CONFIG_PATH}"
+        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/train_config_hilserl_piper_real.json" "${@:2}")
+        python -m lerobot.rl.learner --config "${CONFIG_PATH}"
         ;;
 
     train-actor)
         echo -e "${GREEN}Starting HIL-SERL Actor...${NC}"
         echo -e "${YELLOW}Make sure the learner is already running!${NC}"
-        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/train_config_hilserl.json" "${@:2}")
-        python -m lerobot.rl.actor --config_path "${CONFIG_PATH}"
+        CONFIG_PATH=$(resolve_config_path "${CONFIG_DIR}/train_config_hilserl_piper_real.json" "${@:2}")
+        python -m lerobot.rl.actor --config "${CONFIG_PATH}"
         ;;
 
     test-robot)

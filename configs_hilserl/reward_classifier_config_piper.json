@@ -1,7 +1,7 @@
 {
   "dataset": {
     "repo_id": "thu-vlnlab/piper_pick_lift",
-    "root": "data/demos5"
+    "root": "data/demos10"
   },
   "policy": {
     "type": "reward_classifier",
@@ -16,13 +16,13 @@
     "use_amp": true,
     "push_to_hub": false,
     "input_features": {
-      "observation.images.observation.images.front": {
+      "observation.images.front": {
         "type": "VISUAL",
         "shape": [3, 128, 128]
       }
     }
   },
-  "output_dir": "outputs/reward_classifier_piper6",
+  "output_dir": "outputs/reward_classifier_piper10",
   "batch_size": 16,
   "steps": 8000,
   "eval_freq": 300,
@@ -30,6 +30,6 @@
   "log_freq": 50,
   "wandb": {
     "enable": true,
-    "project": "reward_classifier_piper6"
+    "project": "reward_classifier_piper10"
   }
 }

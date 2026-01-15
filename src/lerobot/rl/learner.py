@@ -598,6 +598,10 @@ def add_actor_information_and_train(
         optimization_step += 1
         if optimization_step % log_freq == 0:
             logging.info(f"[LEARNER] Number of optimization step: {optimization_step}")
+            # 显示buffer大小
+            online_size = len(replay_buffer)
+            offline_size = len(offline_replay_buffer) if offline_replay_buffer is not None else 0
+            logging.info(f"[LEARNER] Buffer sizes - Online: {online_size}, Offline (intervention): {offline_size}")
 
         # Save checkpoint at specified intervals
         if saving_checkpoint and (optimization_step % save_freq == 0 or optimization_step == online_steps):

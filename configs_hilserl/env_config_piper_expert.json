@@ -22,11 +22,11 @@
         "fixed_reset_joint_positions": [2.36, 77.14, -57.0, -5.17, 57.73, -3.15, 0.0],
         "reset_time_s": 5.0,
         "control_time_s": 20.0,
-        "terminate_on_success": false
+        "terminate_on_success": true
       },
       "inverse_kinematics": null,
       "reward_classifier": {
-        "pretrained_path": null,
+        "pretrained_path": "outputs/reward_classifier_piper10/checkpoints/last/pretrained_model",
         "success_threshold": 0.5,
         "success_reward": 1.0
       },
@@ -54,9 +54,9 @@
   },
   "dataset": {
     "repo_id": "thu-vlnlab/piper_pick_lift",
-    "root": "data/demos10",
+    "root": "data/expert_demos10",
     "task": "pick_and_lift",
-    "num_episodes_to_record": 20,
+    "num_episodes_to_record": 10,
     "replay_episode": null,
     "push_to_hub": false
   },
