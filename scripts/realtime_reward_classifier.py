@@ -3,6 +3,12 @@
 Real-time reward classifier visualization.
 Press 'q' to quit.
 """
+"""
+python scripts/realtime_reward_classifier.py \
+      --model-path outputs/reward_classifier_piper2 \
+      --realsense \
+      --serial 338622070324
+"""
 
 import argparse
 import cv2
@@ -60,7 +66,21 @@ def main():
     if weights_path.exists():
         from safetensors.torch import load_file
         state_dict = load_file(weights_path)
-        model.load_state_dict(state_dict, strict=False)
+
+        # Get the image key for mapping
+        image_key = list(config.input_features.keys())[0].replace(".", "_")
+
+        # Map checkpoint keys to model keys
+        # checkpoint: encoder.xxx -> model: encoders.{image_key}.0.xxx
+        new_state_dict = {}
+        for k, v in state_dict.items():
+            if k.startswith("encoder."):
+                new_key = k.replace("encoder.", f"encoders.{image_key}.0.")
+                new_state_dict[new_key] = v
+            else:
+                new_state_dict[k] = v
+
+        model.load_state_dict(new_state_dict, strict=False)
     else:
         # Try pytorch format
         weights_path = model_path / "pytorch_model.bin"
@@ -71,6 +91,26 @@ def main():
     model = model.to(device)
     model.eval()
     print("Model loaded!")
+
+    # Load normalization stats from checkpoint
+    from safetensors.torch import load_file as load_safetensors
+    norm_path = model_path / "classifier_preprocessor_step_0_normalizer_processor.safetensors"
+    img_mean = None
+    img_std = None
+    if norm_path.exists():
+        norm_stats = load_safetensors(norm_path)
+        # Find image normalization keys
+        image_key = list(config.input_features.keys())[0]
+        mean_key = f"{image_key}.mean"
+        std_key = f"{image_key}.std"
+        if mean_key in norm_stats and std_key in norm_stats:
+            img_mean = norm_stats[mean_key].numpy()  # shape [3, 1, 1]
+            img_std = norm_stats[std_key].numpy()
+            print(f"Loaded normalization: mean={img_mean.flatten()}, std={img_std.flatten()}")
+        else:
+            print(f"Warning: Normalization keys not found")
+    else:
+        print(f"Warning: Normalization file not found: {norm_path}")
 
     # Setup camera
     if args.realsense:
@@ -87,7 +127,7 @@ def main():
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         print(f"OpenCV camera {args.camera} started")
 
-    # Image preprocessing (match training)
+    # Image preprocessing (match training: MEAN_STD normalization)
     def preprocess_image(frame):
         # Resize to 128x128 (match training)
         img = cv2.resize(frame, (128, 128))
@@ -96,7 +136,10 @@ def main():
         # Normalize to [0, 1]
         img = img.astype(np.float32) / 255.0
         # HWC to CHW
-        img = np.transpose(img, (2, 0, 1))
+        img = np.transpose(img, (2, 0, 1))  # shape [3, 128, 128]
+        # Apply MEAN_STD normalization if available
+        if img_mean is not None and img_std is not None:
+            img = (img - img_mean) / img_std
         # Add batch dimension
         img = torch.from_numpy(img).unsqueeze(0).to(device)
         return img
