@@ -116,7 +116,9 @@ class Classifier(PreTrainedPolicy):
         self.config = config
 
         # Set up encoder
+        logging.info(f"[DEBUG] Classifier.__init__: Loading backbone from {self.config.model_name}")
         encoder = AutoModel.from_pretrained(self.config.model_name, trust_remote_code=True)
+        logging.info("[DEBUG] Classifier.__init__: Backbone loaded")
         # Extract vision model if we're given a multimodal model
         if hasattr(encoder, "vision_model"):
             logging.info("Multimodal model detected - using vision encoder only")
@@ -276,6 +278,15 @@ class Classifier(PreTrainedPolicy):
         if self.config.num_classes == 2:
             probs = self.predict(images).probabilities
             logging.debug(f"Predicted reward images: {probs}")
+            return (probs > threshold).float()
+        else:
+            return torch.argmax(self.predict(images).probabilities, dim=1)
+
+    def predict_reward_from_list(self, images: list, threshold=0.5):
+        """Eval method that takes a list of image tensors directly (avoids key name matching)."""
+        if self.config.num_classes == 2:
+            probs = self.predict(images).probabilities
+            logging.debug(f"Predicted reward from list: {probs}")
             return (probs > threshold).float()
         else:
             return torch.argmax(self.predict(images).probabilities, dim=1)

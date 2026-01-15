@@ -61,26 +61,13 @@ def main():
     config = RewardClassifierConfig(**config_dict)
     model = Classifier(config)
 
-    # Load weights
+    # Load weights (直接加载，不需要重映射 - encoder 和 encoders[xxx][0] 是同一对象)
     weights_path = model_path / "model.safetensors"
     if weights_path.exists():
         from safetensors.torch import load_file
         state_dict = load_file(weights_path)
-
-        # Get the image key for mapping
-        image_key = list(config.input_features.keys())[0].replace(".", "_")
-
-        # Map checkpoint keys to model keys
-        # checkpoint: encoder.xxx -> model: encoders.{image_key}.0.xxx
-        new_state_dict = {}
-        for k, v in state_dict.items():
-            if k.startswith("encoder."):
-                new_key = k.replace("encoder.", f"encoders.{image_key}.0.")
-                new_state_dict[new_key] = v
-            else:
-                new_state_dict[k] = v
-
-        model.load_state_dict(new_state_dict, strict=False)
+        result = model.load_state_dict(state_dict, strict=False)
+        print(f"Loaded weights: {len(state_dict)} keys, missing: {len(result.missing_keys)}")
     else:
         # Try pytorch format
         weights_path = model_path / "pytorch_model.bin"

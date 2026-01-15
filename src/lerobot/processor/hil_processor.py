@@ -522,7 +522,6 @@ class RewardClassifierProcessorStep(ProcessorStep):
         """Initializes the reward classifier model after the dataclass is created."""
         if self.pretrained_path is not None:
             from lerobot.policies.sac.reward_model.modeling_classifier import Classifier
-
             self.reward_classifier = Classifier.from_pretrained(self.pretrained_path)
             self.reward_classifier.to(self.device)
             self.reward_classifier.eval()
@@ -548,6 +547,10 @@ class RewardClassifierProcessorStep(ProcessorStep):
 
         if not images:
             return new_transition
+
+        # Move images to the same device as the reward classifier
+        images = {key: value.to(self.device) if isinstance(value, torch.Tensor) else value
+                  for key, value in images.items()}
 
         # Run reward classifier
         start_time = time.perf_counter()

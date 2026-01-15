@@ -369,17 +369,16 @@ class PiperFollowerEndEffector(PiperFollower):
         """Get observation including end-effector pose."""
         obs_dict = super().get_observation()
 
-        # Get forward kinematics (end-effector pose)
+        # Get end-effector pose directly from robot (same as piper_control_loop)
         if self._piper is not None:
-            fk = self._piper.GetFK(mode="feedback")
-            # FK returns [X, Y, Z, RX, RY, RZ] in mm and degrees
-            if fk and len(fk) >= 6:
-                obs_dict["ee.x"] = fk[0][0] / 1000.0  # mm to m
-                obs_dict["ee.y"] = fk[0][1] / 1000.0
-                obs_dict["ee.z"] = fk[0][2] / 1000.0
-                obs_dict["ee.rx"] = fk[0][3]  # degrees
-                obs_dict["ee.ry"] = fk[0][4]
-                obs_dict["ee.rz"] = fk[0][5]
+            end_pose = self._piper.GetArmEndPoseMsgs()
+            # Convert from 0.001mm to m, and 0.001deg to deg
+            obs_dict["ee.x"] = end_pose.end_pose.X_axis / 1000.0 / 1000.0  # 0.001mm -> m
+            obs_dict["ee.y"] = end_pose.end_pose.Y_axis / 1000.0 / 1000.0
+            obs_dict["ee.z"] = end_pose.end_pose.Z_axis / 1000.0 / 1000.0
+            obs_dict["ee.rx"] = end_pose.end_pose.RX_axis / 1000.0  # 0.001deg -> deg
+            obs_dict["ee.ry"] = end_pose.end_pose.RY_axis / 1000.0
+            obs_dict["ee.rz"] = end_pose.end_pose.RZ_axis / 1000.0
 
         return obs_dict
 
