@@ -32,7 +32,7 @@ class SimplePiperGamepadTest:
         self.gripper_pos = 35000  # 0.001mm 单位
 
         # 初始关节位置 (0.001度)
-        self.INIT_JOINTS = [2362, 77140, -56995, -5172, 57728, -3150]
+        self.INIT_JOINTS = [0, 77140, -56995, 0, 77728, 0]
 
     def connect_gamepad(self) -> bool:
         """连接手柄"""

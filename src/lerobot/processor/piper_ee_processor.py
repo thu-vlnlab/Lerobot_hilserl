@@ -57,9 +57,9 @@ class PiperDeltaToAbsoluteEEStep(ProcessorStep):
 
     # Default workspace bounds (meters)
     ee_bounds: dict = field(default_factory=lambda: {
-        "x_min": 0.05, "x_max": 0.5,
-        "y_min": -0.4, "y_max": 0.4,
-        "z_min": 0.0, "z_max": 0.5,
+        "x_min": 0.136, "x_max": 0.38,
+        "y_min": -0.159, "y_max": 0.220,
+        "z_min": 0.135, "z_max": 0.3,
     })
 
     # Internal state for gripper

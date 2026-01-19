@@ -349,6 +349,8 @@ class PiperFollowerEndEffector(PiperFollower):
     def __init__(self, config: PiperFollowerEndEffectorConfig):
         super().__init__(config)
         self.config = config
+        # Fixed orientation values (will be set on first observation or connect)
+        self._fixed_orientation: dict[str, float] | None = None
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
@@ -409,15 +411,25 @@ class PiperFollowerEndEffector(PiperFollower):
         # Get current end-effector pose to fill in missing values
         current_obs = self.get_observation()
 
+        # Initialize fixed orientation on first call (record initial orientation)
+        if self._fixed_orientation is None:
+            self._fixed_orientation = {
+                "rx": current_obs.get("ee.rx", 0.0),
+                "ry": current_obs.get("ee.ry", 0.0),
+                "rz": current_obs.get("ee.rz", 0.0),
+            }
+            logger.info(f"Fixed orientation set to: rx={self._fixed_orientation['rx']:.2f}, "
+                       f"ry={self._fixed_orientation['ry']:.2f}, rz={self._fixed_orientation['rz']:.2f}")
+
         # Extract target position (convert meters to mm for SDK)
         target_x = action.get("ee.x", current_obs.get("ee.x", 0.3)) * 1000  # m to mm
         target_y = action.get("ee.y", current_obs.get("ee.y", 0.0)) * 1000
         target_z = action.get("ee.z", current_obs.get("ee.z", 0.2)) * 1000
 
-        # Keep current orientation (or use provided)
-        target_rx = action.get("ee.rx", current_obs.get("ee.rx", 0.0))
-        target_ry = action.get("ee.ry", current_obs.get("ee.ry", 0.0))
-        target_rz = action.get("ee.rz", current_obs.get("ee.rz", 0.0))
+        # Use fixed orientation to prevent drift (or use explicitly provided values)
+        target_rx = action.get("ee.rx", self._fixed_orientation["rx"])
+        target_ry = action.get("ee.ry", self._fixed_orientation["ry"])
+        target_rz = action.get("ee.rz", self._fixed_orientation["rz"])
 
         # Convert to SDK units (0.001 mm and 0.001 degrees)
         X = int(target_x * 1000)
