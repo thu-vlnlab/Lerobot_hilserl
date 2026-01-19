@@ -566,7 +566,7 @@ class RewardClassifierProcessorStep(ProcessorStep):
             image_list = [images[key] for key in self.reward_classifier.config.input_features if key in images]
             if image_list:
                 probs = self.reward_classifier.predict(image_list).probabilities
-                logging.info(f"[REWARD_CLASSIFIER] Probability: {probs.item():.4f}, threshold: {self.success_threshold}")
+                # logging.info(f"[REWARD_CLASSIFIER] Probability: {probs.item():.4f}, threshold: {self.success_threshold}")
 
             success = self.reward_classifier.predict_reward(images, threshold=self.success_threshold)
 
