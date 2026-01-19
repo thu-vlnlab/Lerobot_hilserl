@@ -116,9 +116,7 @@ class Classifier(PreTrainedPolicy):
         self.config = config
 
         # Set up encoder
-        logging.info(f"[DEBUG] Classifier.__init__: Loading backbone from {self.config.model_name}")
         encoder = AutoModel.from_pretrained(self.config.model_name, trust_remote_code=True)
-        logging.info("[DEBUG] Classifier.__init__: Backbone loaded")
         # Extract vision model if we're given a multimodal model
         if hasattr(encoder, "vision_model"):
             logging.info("Multimodal model detected - using vision encoder only")

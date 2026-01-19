@@ -54,7 +54,7 @@
   },
   "dataset": {
     "repo_id": "thu-vlnlab/piper_pick_lift",
-    "root": "data/demos10",
+    "root": "data/demos10v2",
     "task": "pick_and_lift",
     "num_episodes_to_record": 20,
     "replay_episode": null,

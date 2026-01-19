@@ -134,6 +134,10 @@ class GamepadTeleop(Teleoperator):
         # Check if intervention is active
         is_intervention = self.gamepad.should_intervene()
 
+        # Debug: print intervention status periodically
+        if is_intervention:
+            print(f"\r[GAMEPAD] LB pressed - Intervention ACTIVE   ", end="")
+
         # Get episode end status
         episode_end_status = self.gamepad.get_episode_end_status()
         terminate_episode = episode_end_status in [

@@ -230,9 +230,15 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 # 4. （可选）采集专家数据
 ./scripts/run_hilserl.sh record-expert configs_hilserl/env_config_piper_expert.json
 
-# 5. HIL-SERL训练
+# 5. HIL-SERL训练（首次）
 # 终端1
 ./scripts/run_hilserl.sh train-learner configs_hilserl/train_config_hilserl_piper_real.json
 # 终端2
 ./scripts/run_hilserl.sh train-actor configs_hilserl/train_config_hilserl_piper_real.json
+
+# 6. 继续训练（resume）
+# 终端1
+./scripts/run_hilserl.sh train-learner outputs/train_hilserl_piper_real/checkpoints/last/pretrained_model/train_config.json
+# 终端2
+./scripts/run_hilserl.sh train-actor outputs/train_hilserl_piper_real/checkpoints/last/pretrained_model/train_config.json
 ```

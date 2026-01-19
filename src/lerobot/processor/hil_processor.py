@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import logging
 import math
 import time
 from dataclasses import dataclass
@@ -555,6 +556,18 @@ class RewardClassifierProcessorStep(ProcessorStep):
         # Run reward classifier
         start_time = time.perf_counter()
         with torch.inference_mode():
+            # Debug: 打印输入的key和shape
+            logging.debug(f"[REWARD_CLASSIFIER] Input keys: {list(images.keys())}")
+            for k, v in images.items():
+                if hasattr(v, 'shape'):
+                    logging.debug(f"[REWARD_CLASSIFIER] {k} shape: {v.shape}")
+
+            # 获取原始概率值用于调试
+            image_list = [images[key] for key in self.reward_classifier.config.input_features if key in images]
+            if image_list:
+                probs = self.reward_classifier.predict(image_list).probabilities
+                logging.info(f"[REWARD_CLASSIFIER] Probability: {probs.item():.4f}, threshold: {self.success_threshold}")
+
             success = self.reward_classifier.predict_reward(images, threshold=self.success_threshold)
 
         classifier_frequency = 1 / (time.perf_counter() - start_time)

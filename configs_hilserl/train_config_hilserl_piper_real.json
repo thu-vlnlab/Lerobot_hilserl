@@ -1,4 +1,6 @@
 {
+  "output_dir": "outputs/train_hilserl_piper_real_10merge",
+  "resume": false,
   "batch_size": 64,
   "save_checkpoint": true,
   "save_freq": 500,
@@ -85,8 +87,8 @@
       },
       "inverse_kinematics": null,
       "reward_classifier": {
-        "pretrained_path": "outputs/reward_classifier_piper10/checkpoints/last/pretrained_model",
-        "success_threshold": 0.5,
+        "pretrained_path": "outputs/reward_classifier_piper10merge/checkpoints/last/pretrained_model",
+        "success_threshold": 0.85,
         "success_reward": 1.0
       },
       "max_gripper_pos": 70.0
@@ -117,7 +119,7 @@
   },
   "wandb": {
     "enable": true,
-    "project": "piper-hilserl-real",
+    "project": "piper-hilserl-real-10merge",
     "entity": null
   }
 }

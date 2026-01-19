@@ -1179,7 +1179,13 @@ def process_transitions(
 
             # Add to offline buffer if it's an intervention
             # 改为检查 offline_replay_buffer 而不是 dataset_repo_id，这样即使 dataset: null 也能存储干预数据
-            is_intervention = transition.get("complementary_info", {}).get(TeleopEvents.IS_INTERVENTION)
+            complementary_info = transition.get("complementary_info", {})
+            is_intervention = complementary_info.get(TeleopEvents.IS_INTERVENTION)
+
+            # Debug: 打印complementary_info的keys
+            if len(replay_buffer) % 100 == 0:
+                logging.info(f"[LEARNER DEBUG] complementary_info keys: {list(complementary_info.keys())}, is_intervention={is_intervention}")
+
             if offline_replay_buffer is not None and is_intervention:
                 offline_replay_buffer.add(**transition)
                 logging.info(f"[LEARNER] Intervention recorded, offline_buffer_size: {len(offline_replay_buffer)}")

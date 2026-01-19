@@ -102,7 +102,8 @@ from .gym_manipulator import (
 
 @parser.wrap()
 def actor_cli(cfg: TrainRLServerPipelineConfig):
-    cfg.validate()
+    # Actor跳过目录检查，因为Learner已经创建了目录
+    cfg.validate(skip_dir_check=True)
     display_pid = False
     if not use_threads(cfg):
         import torch.multiprocessing as mp
@@ -323,9 +324,11 @@ def act_with_policy(
 
         # Check for intervention from transition info
         intervention_info = new_transition[TransitionKey.INFO]
-        if intervention_info.get(TeleopEvents.IS_INTERVENTION, False):
+        is_intervening = intervention_info.get(TeleopEvents.IS_INTERVENTION, False)
+        if is_intervening:
             episode_intervention = True
             episode_intervention_steps += 1
+            logging.info(f"[ACTOR] Intervention detected! Step {episode_total_steps}")
 
         complementary_info = {
             "discrete_penalty": torch.tensor(
