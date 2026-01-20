@@ -242,3 +242,9 @@ export LD_LIBRARY_PATH=$CONDA_PREFIX/lib:$LD_LIBRARY_PATH
 # 终端2
 ./scripts/run_hilserl.sh train-actor outputs/train_hilserl_piper_real/checkpoints/last/pretrained_model/train_config.json
 ```
+
+# 终端1
+python -m lerobot.rl.learner --config_path=/home/ubuntu/Lerobot_hilserl/outputs/train_hilserl_piper_real_10merge/checkpoints/0007000/pretrained_model/train_config.json
+
+# 终端2
+python -m lerobot.rl.actor --config_path=/home/ubuntu/Lerobot_hilserl/outputs/train_hilserl_piper_real_10merge/checkpoints/0007000/pretrained_model/train_config.json

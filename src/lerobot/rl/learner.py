@@ -582,7 +582,7 @@ def add_actor_information_and_train(
         time_for_one_optimization_step = time.time() - time_for_one_optimization_step
         frequency_for_one_optimization_step = 1 / (time_for_one_optimization_step + 1e-9)
 
-        logging.info(f"[LEARNER] Optimization frequency loop [Hz]: {frequency_for_one_optimization_step}")
+        # logging.info(f"[LEARNER] Optimization frequency loop [Hz]: {frequency_for_one_optimization_step}")
 
         # Log optimization frequency
         if wandb_logger:
