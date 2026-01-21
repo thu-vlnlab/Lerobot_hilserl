@@ -529,6 +529,7 @@ def make_processors(
                 success_threshold=cfg.processor.reward_classifier.success_threshold,
                 success_reward=cfg.processor.reward_classifier.success_reward,
                 terminate_on_success=terminate_on_success,
+                position_constraint=getattr(cfg.processor.reward_classifier, 'position_constraint', None),
             )
         )
 

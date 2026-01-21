@@ -516,6 +516,9 @@ class RewardClassifierProcessorStep(ProcessorStep):
     success_threshold: float = 0.5
     success_reward: float = 1.0
     terminate_on_success: bool = True
+    # 位置约束：只有 EE 在目标区域内才给 reward
+    # 格式: {"x_min": 0.2, "x_max": 0.3, "y_min": -0.1, "y_max": 0.1, "z_min": 0.1, "z_max": 0.2}
+    position_constraint: dict | None = None
 
     reward_classifier: Any = None
 
@@ -576,7 +579,27 @@ class RewardClassifierProcessorStep(ProcessorStep):
         reward = new_transition.get(TransitionKey.REWARD, 0.0)
         terminated = new_transition.get(TransitionKey.DONE, False)
 
-        if math.isclose(success, 1, abs_tol=1e-2):
+        # 检查位置约束
+        position_ok = True
+        if self.position_constraint is not None:
+            ee_x = observation.get("ee.x")
+            ee_y = observation.get("ee.y")
+            ee_z = observation.get("ee.z")
+
+            if ee_x is not None and ee_y is not None and ee_z is not None:
+                x = float(ee_x.item() if hasattr(ee_x, 'item') else ee_x)
+                y = float(ee_y.item() if hasattr(ee_y, 'item') else ee_y)
+                z = float(ee_z.item() if hasattr(ee_z, 'item') else ee_z)
+
+                pc = self.position_constraint
+                position_ok = (
+                    pc.get("x_min", -999) <= x <= pc.get("x_max", 999) and
+                    pc.get("y_min", -999) <= y <= pc.get("y_max", 999) and
+                    pc.get("z_min", -999) <= z <= pc.get("z_max", 999)
+                )
+
+        # 分类器通过 AND 位置约束通过 才给 reward
+        if math.isclose(success, 1, abs_tol=1e-2) and position_ok:
             reward = self.success_reward
             if self.terminate_on_success:
                 terminated = True
