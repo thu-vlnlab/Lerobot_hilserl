@@ -156,6 +156,7 @@ class SACPolicy(
         self,
         batch: dict[str, Tensor | dict[str, Tensor]],
         model: Literal["actor", "critic", "temperature", "discrete_critic"] = "critic",
+        return_stats: bool = False,
     ) -> dict[str, Tensor]:
         """Compute the loss for the given model
 
@@ -169,9 +170,10 @@ class SACPolicy(
                 - observation_feature: Optional pre-computed observation features
                 - next_observation_feature: Optional pre-computed next observation features
             model: Which model to compute the loss for ("actor", "critic", "discrete_critic", or "temperature")
+            return_stats: If True, return additional statistics for monitoring
 
         Returns:
-            The computed loss tensor
+            The computed loss tensor and optionally statistics
         """
         # Extract common components from batch
         actions: Tensor = batch[ACTION]
@@ -185,7 +187,7 @@ class SACPolicy(
             done: Tensor = batch["done"]
             next_observation_features: Tensor = batch.get("next_observation_feature")
 
-            loss_critic = self.compute_loss_critic(
+            result = self.compute_loss_critic(
                 observations=observations,
                 actions=actions,
                 rewards=rewards,
@@ -193,9 +195,13 @@ class SACPolicy(
                 done=done,
                 observation_features=observation_features,
                 next_observation_features=next_observation_features,
+                return_stats=return_stats,
             )
 
-            return {"loss_critic": loss_critic}
+            if return_stats:
+                loss_critic, stats = result
+                return {"loss_critic": loss_critic, **stats}
+            return {"loss_critic": result}
 
         if model == "discrete_critic" and self.config.num_discrete_actions is not None:
             # Extract critic-specific components
@@ -215,13 +221,17 @@ class SACPolicy(
                 complementary_info=complementary_info,
             )
             return {"loss_discrete_critic": loss_discrete_critic}
+
         if model == "actor":
-            return {
-                "loss_actor": self.compute_loss_actor(
-                    observations=observations,
-                    observation_features=observation_features,
-                )
-            }
+            result = self.compute_loss_actor(
+                observations=observations,
+                observation_features=observation_features,
+                return_stats=return_stats,
+            )
+            if return_stats:
+                loss_actor, stats = result
+                return {"loss_actor": loss_actor, **stats}
+            return {"loss_actor": result}
 
         if model == "temperature":
             return {
@@ -267,7 +277,8 @@ class SACPolicy(
         done,
         observation_features: Tensor | None = None,
         next_observation_features: Tensor | None = None,
-    ) -> Tensor:
+        return_stats: bool = False,
+    ) -> Tensor | tuple[Tensor, dict]:
         with torch.no_grad():
             next_action_preds, next_log_probs, _ = self.actor(next_observations, next_observation_features)
 
@@ -310,13 +321,35 @@ class SACPolicy(
         # Compute state-action value loss (TD loss) for all of the Q functions in the ensemble.
         td_target_duplicate = einops.repeat(td_target, "b -> e b", e=q_preds.shape[0])
         # You compute the mean loss of the batch for each critic and then to compute the final loss you sum them up
-        critics_loss = (
-            F.mse_loss(
-                input=q_preds,
-                target=td_target_duplicate,
-                reduction="none",
-            ).mean(dim=1)
-        ).sum()
+        td_errors = F.mse_loss(
+            input=q_preds,
+            target=td_target_duplicate,
+            reduction="none",
+        )
+        critics_loss = td_errors.mean(dim=1).sum()
+
+        if return_stats:
+            with torch.no_grad():
+                # Q value statistics (across all critics and batch)
+                q_flat = q_preds.flatten()
+                stats = {
+                    "q_mean": q_flat.mean().item(),
+                    "q_min": q_flat.min().item(),
+                    "q_max": q_flat.max().item(),
+                    "q_std": q_flat.std().item(),
+                    # TD error statistics
+                    "td_error_mean": td_errors.mean().item(),
+                    # Target Q statistics
+                    "q_target_mean": td_target.mean().item(),
+                    # Reward statistics from batch
+                    "reward_batch_mean": rewards.mean().item(),
+                    "reward_batch_min": rewards.min().item(),
+                    "reward_batch_max": rewards.max().item(),
+                    # Q value spread across critics (measures disagreement)
+                    "q_critics_std": q_preds.std(dim=0).mean().item(),
+                }
+            return critics_loss, stats
+
         return critics_loss
 
     def compute_loss_discrete_critic(
@@ -390,8 +423,9 @@ class SACPolicy(
         self,
         observations,
         observation_features: Tensor | None = None,
-    ) -> Tensor:
-        actions_pi, log_probs, _ = self.actor(observations, observation_features)
+        return_stats: bool = False,
+    ) -> Tensor | tuple[Tensor, dict]:
+        actions_pi, log_probs, means = self.actor(observations, observation_features)
 
         q_preds = self.critic_forward(
             observations=observations,
@@ -402,6 +436,19 @@ class SACPolicy(
         min_q_preds = q_preds.min(dim=0)[0]
 
         actor_loss = ((self.temperature * log_probs) - min_q_preds).mean()
+
+        if return_stats:
+            with torch.no_grad():
+                stats = {
+                    # Action entropy: H(a|s) = -E[log pi(a|s)], 探索程度
+                    "action_entropy": -log_probs.mean().item(),
+                    # Policy mean norm (before tanh), 监控Tanh饱和
+                    "policy_mean_norm": means.norm(dim=-1).mean().item(),
+                    # Q value for actor actions, 策略质量
+                    "actor_q_mean": min_q_preds.mean().item(),
+                }
+            return actor_loss, stats
+
         return actor_loss
 
     def _init_encoders(self):

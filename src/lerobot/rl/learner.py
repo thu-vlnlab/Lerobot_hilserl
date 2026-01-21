@@ -493,7 +493,9 @@ def add_actor_information_and_train(
             "next_observation_feature": next_observation_features,
         }
 
-        critic_output = policy.forward(forward_batch, model="critic")
+        # Only compute stats when logging (to reduce overhead)
+        should_log_stats = (optimization_step % log_freq == 0)
+        critic_output = policy.forward(forward_batch, model="critic", return_stats=should_log_stats)
 
         loss_critic = critic_output["loss_critic"]
         optimizers["critic"].zero_grad()
@@ -508,6 +510,14 @@ def add_actor_information_and_train(
             "loss_critic": loss_critic.item(),
             "critic_grad_norm": critic_grad_norm,
         }
+
+        # Add critic stats if logging
+        if should_log_stats:
+            for key in ["q_mean", "q_min", "q_max", "q_std", "td_error_mean",
+                        "q_target_mean", "reward_batch_mean", "reward_batch_min",
+                        "reward_batch_max", "q_critics_std"]:
+                if key in critic_output:
+                    training_infos[key] = critic_output[key]
 
         # Discrete critic optimization (if available)
         if policy.config.num_discrete_actions is not None:
@@ -527,8 +537,8 @@ def add_actor_information_and_train(
         # Actor and temperature optimization (at specified frequency)
         if optimization_step % policy_update_freq == 0:
             for _ in range(policy_update_freq):
-                # Actor optimization
-                actor_output = policy.forward(forward_batch, model="actor")
+                # Actor optimization (with stats only when logging)
+                actor_output = policy.forward(forward_batch, model="actor", return_stats=should_log_stats)
                 loss_actor = actor_output["loss_actor"]
                 optimizers["actor"].zero_grad()
                 loss_actor.backward()
@@ -540,6 +550,12 @@ def add_actor_information_and_train(
                 # Add actor info to training info
                 training_infos["loss_actor"] = loss_actor.item()
                 training_infos["actor_grad_norm"] = actor_grad_norm
+
+                # Add actor stats if logging
+                if should_log_stats:
+                    for key in ["action_entropy", "policy_mean_norm", "actor_q_mean"]:
+                        if key in actor_output:
+                            training_infos[key] = actor_output[key]
 
                 # Temperature optimization
                 temperature_output = policy.forward(forward_batch, model="temperature")

@@ -1153,13 +1153,60 @@ logging.info(f"Buffer sizes - Online: {len(replay_buffer)}, Offline: {len(offlin
 
 ### A.2 监控训练指标
 
-关键 WandB 指标:
-- `Episodic reward`: Episode 累计奖励
-- `Intervention rate`: 人类干预率 (应逐渐下降)
-- `loss_critic`: Critic 损失
-- `loss_actor`: Actor 损失
-- `temperature`: 温度参数
-- `Optimization frequency loop [Hz]`: 优化循环频率
+#### 基础指标
+
+| 指标 | 说明 | 期望趋势 |
+|------|------|----------|
+| `Episodic reward` | Episode 累计奖励 | ↑ 上升 |
+| `Intervention rate` | 人类干预率 | ↓ 下降 |
+| `loss_critic` | Critic 损失 | ↓ 下降后稳定 |
+| `loss_actor` | Actor 损失 | 动态变化 |
+| `temperature` | 温度参数 | 自动调节 |
+| `Optimization frequency loop [Hz]` | 优化循环频率 | 稳定 |
+
+#### Q值监控指标 (Critic)
+
+| 指标 | 说明 | 异常判断 |
+|------|------|----------|
+| `q_mean` | Q值均值 | 监控Q值尺度 |
+| `q_min` | Q值最小值 | 检测Q值下界 |
+| `q_max` | Q值最大值 | >100 可能发散 |
+| `q_std` | Q值标准差 | Q值分布宽度 |
+| `q_critics_std` | Critics间标准差 | 集成分歧度，越大说明critics不一致 |
+| `td_error_mean` | TD误差均值 | 不下降=未收敛 |
+| `q_target_mean` | Target Q均值 | Bootstrap目标 |
+| `reward_batch_mean` | Batch奖励均值 | 采样质量 |
+| `reward_batch_min` | Batch奖励最小值 | 采样分布 |
+| `reward_batch_max` | Batch奖励最大值 | 采样分布 |
+
+#### 策略监控指标 (Actor)
+
+| 指标 | 说明 | 异常判断 |
+|------|------|----------|
+| `action_entropy` | 动作熵 H(a\|s) = -E[log π(a\|s)] | 骤降=过早收敛，需增大temperature |
+| `policy_mean_norm` | 策略均值范数 (Tanh前) | >5 可能Tanh饱和，梯度消失 |
+| `actor_q_mean` | Actor动作的Q值均值 | 策略质量，应逐渐上升 |
+
+#### 训练健康检查
+
+```
+问题诊断:
+├── q_max 爆炸 (>100)      → Q值发散，降低lr或检查reward设计
+├── action_entropy 骤降    → 策略过早收敛，增大temperature_init
+├── q_critics_std 持续很大 → Critics不一致，可能过拟合，检查utd_ratio
+├── td_error_mean 不降     → 训练未收敛，检查网络结构或学习率
+├── Intervention rate 不降 → 策略未学会，检查reward信号
+└── actor_q_mean 不升      → 策略质量未提升，检查actor_lr
+```
+
+#### 日志频率配置
+
+```json
+{
+  "log_freq": 200  // 每200个optimization_step记录一次 (默认值)
+                   // 换算: 200/utd_ratio=10个env_step ≈ 1秒 (10Hz时)
+}
+```
 
 ### A.3 检查点恢复
 
