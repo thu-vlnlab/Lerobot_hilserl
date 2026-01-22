@@ -299,8 +299,10 @@ class SACPolicy(
 
             # critics subsample size
             min_q, _ = q_targets.min(dim=0)  # Get values from min operation
+            entropy_bonus = torch.zeros_like(min_q)
             if self.config.use_backup_entropy:
-                min_q = min_q - (self.temperature * next_log_probs)
+                entropy_bonus = self.temperature * (-next_log_probs)  # α * entropy (positive)
+                min_q = min_q + entropy_bonus  # 原式: min_q - α*log_prob = min_q + α*(-log_prob)
 
             td_target = rewards + (1 - done) * self.config.discount * min_q
 
@@ -347,6 +349,9 @@ class SACPolicy(
                     "reward_batch_max": rewards.max().item(),
                     # Q value spread across critics (measures disagreement)
                     "q_critics_std": q_preds.std(dim=0).mean().item(),
+                    # Entropy bonus contribution (α * entropy per step)
+                    "entropy_bonus_mean": entropy_bonus.mean().item(),
+                    "next_entropy": (-next_log_probs).mean().item(),
                 }
             return critics_loss, stats
 

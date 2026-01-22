@@ -515,7 +515,8 @@ def add_actor_information_and_train(
         if should_log_stats:
             for key in ["q_mean", "q_min", "q_max", "q_std", "td_error_mean",
                         "q_target_mean", "reward_batch_mean", "reward_batch_min",
-                        "reward_batch_max", "q_critics_std"]:
+                        "reward_batch_max", "q_critics_std",
+                        "entropy_bonus_mean", "next_entropy"]:
                 if key in critic_output:
                     training_infos[key] = critic_output[key]
 

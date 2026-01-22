@@ -171,6 +171,8 @@ class RewardClassifierConfig:
     pretrained_path: str | None = None
     success_threshold: float = 0.5
     success_reward: float = 1.0
+    # 位置约束：只有 EE 在目标区域内才给 reward
+    position_constraint: dict | None = None
 
 
 @dataclass
