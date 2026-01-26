@@ -833,12 +833,19 @@ def piper_control_loop(
                     if isinstance(v, torch.Tensor)
                 }
 
-                action_to_record = torch.tensor([
-                    teleop_action.get("delta_x", 0.0),
-                    teleop_action.get("delta_y", 0.0),
-                    teleop_action.get("delta_z", 0.0),
-                    float(teleop_action.get("gripper", 1)),
-                ], dtype=torch.float32)
+                if use_gripper:
+                    action_to_record = torch.tensor([
+                        teleop_action.get("delta_x", 0.0),
+                        teleop_action.get("delta_y", 0.0),
+                        teleop_action.get("delta_z", 0.0),
+                        float(teleop_action.get("gripper", 1)),
+                    ], dtype=torch.float32)
+                else:
+                    action_to_record = torch.tensor([
+                        teleop_action.get("delta_x", 0.0),
+                        teleop_action.get("delta_y", 0.0),
+                        teleop_action.get("delta_z", 0.0),
+                    ], dtype=torch.float32)
 
                 frame = {
                     **observations,

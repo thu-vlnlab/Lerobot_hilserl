@@ -1,5 +1,5 @@
 {
-  "output_dir": "outputs/train_hilserl_piper_real_v3mergetest7",
+  "output_dir": "outputs/train_hilserl_piper_real_v4",
   "resume": false,
   "batch_size": 64,
   "save_checkpoint": true,
@@ -8,13 +8,13 @@
     "type": "sac",
     "push_to_hub": false,
     "device": "cuda",
-    "temperature_init": 0.05,
+    "temperature_init": 0.01,
     "discount": 0.99,
     "critic_target_update_weight": 0.005,
     "actor_lr": 3e-4,
     "critic_lr": 1e-4,
     "temperature_lr": 3e-4,
-    "utd_ratio": 4,
+    "utd_ratio": 20,
     "num_critics": 10,
     "num_subsample_critics": 2,
     "storage_device": "cuda",
@@ -38,7 +38,7 @@
     "output_features": {
       "action": {
         "type": "ACTION",
-        "shape": [4]
+        "shape": [3]
       }
     }
   },
@@ -50,7 +50,7 @@
     "features": {
       "action": {
         "type": "ACTION",
-        "shape": [4]
+        "shape": [3]
       },
       "observation.images.front": {
         "type": "VISUAL",
@@ -78,7 +78,7 @@
         "resize_size": [128, 128]
       },
       "gripper": {
-        "use_gripper": true,
+        "use_gripper": false,
         "gripper_penalty": 0.0
       },
       "reset": {
@@ -120,16 +120,16 @@
     },
     "teleop": {
       "type": "gamepad",
-      "use_gripper": true
+      "use_gripper": false
     }
   },
   "dataset": {
-    "repo_id": "piper_pick_lift_v3",
-    "root": "data/exportdemosv3"
+    "repo_id": "piper_pick_lift_v4",
+    "root": "data/expert_demosv4"
   },
   "wandb": {
     "enable": true,
-    "project": "piper-hilserl-real-v3",
+    "project": "piper-hilserl-real-v4",
     "entity": null
   }
 }

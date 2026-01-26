@@ -902,6 +902,12 @@ def handle_resume_logic(cfg: TrainRLServerPipelineConfig) -> TrainRLServerPipeli
 
     # Ensure resume flag is set in returned config
     checkpoint_cfg.resume = True
+
+    # IMPORTANT: Set pretrained_path to load model weights from checkpoint
+    pretrained_model_path = os.path.join(checkpoint_dir, PRETRAINED_MODEL_DIR)
+    checkpoint_cfg.policy.pretrained_path = pretrained_model_path
+    logging.info(f"Setting pretrained_path to: {pretrained_model_path}")
+
     return checkpoint_cfg
 
 
