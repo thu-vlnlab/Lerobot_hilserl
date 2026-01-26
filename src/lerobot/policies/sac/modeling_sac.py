@@ -422,7 +422,9 @@ class SACPolicy(
         with torch.no_grad():
             _, log_probs, _ = self.actor(observations, observation_features)
         # Use log_alpha directly for more stable gradient updates
-        temperature_loss = (-self.log_alpha * (log_probs + self.target_entropy)).mean()
+        temperature_loss = (self.log_alpha * (-log_probs + self.target_entropy)).mean()
+        #raw: temperature_loss = (-self.log_alpha.exp() * (log_probs + self.target_entropy)).mean()
+
         return temperature_loss
 
     def compute_loss_actor(
