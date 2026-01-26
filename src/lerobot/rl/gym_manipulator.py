@@ -749,6 +749,12 @@ def piper_control_loop(
     episode_start_time = time.perf_counter()
     success_locked = False  # Lock success state once Y is pressed
 
+    # Get success_reward from config (default to 1.0 if not specified)
+    success_reward = 1.0
+    if cfg.env.processor.reward_classifier is not None:
+        success_reward = getattr(cfg.env.processor.reward_classifier, 'success_reward', 1.0)
+    logging.info(f"Using success_reward: {success_reward}")
+
     try:
         while episode_idx < cfg.dataset.num_episodes_to_record:
             step_start_time = time.perf_counter()
@@ -850,7 +856,7 @@ def piper_control_loop(
                 frame = {
                     **observations,
                     ACTION: action_to_record,
-                    REWARD: np.array([float(success_locked)], dtype=np.float32),
+                    REWARD: np.array([success_reward if success_locked else 0.0], dtype=np.float32),
                     DONE: np.array([success_locked or failure or rerecord], dtype=bool),
                 }
                 if use_gripper:
