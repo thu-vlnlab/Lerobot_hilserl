@@ -81,20 +81,28 @@ class SACPolicy(
         raise NotImplementedError("SACPolicy does not support action chunking. It returns single actions!")
 
     @torch.no_grad()
-    def select_action(self, batch: dict[str, Tensor], explore: bool = True) -> Tensor:
+    def select_action(
+        self, batch: dict[str, Tensor], explore: bool = True, return_distribution_params: bool = False
+    ) -> Tensor | tuple[Tensor, Tensor, Tensor]:
         """Select action for inference/evaluation
 
         Args:
             batch: Observation batch
             explore: If True, use epsilon-greedy for discrete actions (training)
                      If False, use greedy selection (evaluation)
+            return_distribution_params: If True, also return mean and std of the action distribution
+
+        Returns:
+            actions: Action tensor
+            mean (optional): Mean of the action distribution (if return_distribution_params=True)
+            std (optional): Standard deviation of the action distribution (if return_distribution_params=True)
         """
 
         observations_features = None
         if self.shared_encoder and self.actor.encoder.has_images:
             observations_features = self.actor.encoder.get_cached_image_features(batch)
 
-        actions, _, _ = self.actor(batch, observations_features)
+        actions, _, mean, std = self.actor(batch, observations_features)
 
         if self.config.num_discrete_actions is not None:
             discrete_action_value = self.discrete_critic(batch, observations_features)
@@ -111,6 +119,8 @@ class SACPolicy(
                 discrete_action = torch.argmax(discrete_action_value, dim=-1, keepdim=True)
             actions = torch.cat([actions, discrete_action], dim=-1)
 
+        if return_distribution_params:
+            return actions, mean, std
         return actions
 
     def critic_forward(
@@ -280,7 +290,7 @@ class SACPolicy(
         return_stats: bool = False,
     ) -> Tensor | tuple[Tensor, dict]:
         with torch.no_grad():
-            next_action_preds, next_log_probs, _ = self.actor(next_observations, next_observation_features)
+            next_action_preds, next_log_probs, _, _ = self.actor(next_observations, next_observation_features)
 
             # 2- compute q targets
             q_targets = self.critic_forward(
@@ -343,10 +353,6 @@ class SACPolicy(
                     "td_error_mean": td_errors.mean().item(),
                     # Target Q statistics
                     "q_target_mean": td_target.mean().item(),
-                    # Reward statistics from batch
-                    "reward_batch_mean": rewards.mean().item(),
-                    "reward_batch_min": rewards.min().item(),
-                    "reward_batch_max": rewards.max().item(),
                     # Q value spread across critics (measures disagreement)
                     "q_critics_std": q_preds.std(dim=0).mean().item(),
                     # Entropy bonus contribution (α * entropy per step)
@@ -420,7 +426,7 @@ class SACPolicy(
         """Compute the temperature loss"""
         # calculate temperature loss
         with torch.no_grad():
-            _, log_probs, _ = self.actor(observations, observation_features)
+            _, log_probs, _, _ = self.actor(observations, observation_features)
         # Use log_alpha directly for more stable gradient updates
         temperature_loss = (self.log_alpha * (-log_probs + self.target_entropy)).mean()
         #raw: temperature_loss = (-self.log_alpha.exp() * (log_probs + self.target_entropy)).mean()
@@ -433,7 +439,7 @@ class SACPolicy(
         observation_features: Tensor | None = None,
         return_stats: bool = False,
     ) -> Tensor | tuple[Tensor, dict]:
-        actions_pi, log_probs, means = self.actor(observations, observation_features)
+        actions_pi, log_probs, means, std = self.actor(observations, observation_features)
 
         q_preds = self.critic_forward(
             observations=observations,
@@ -452,6 +458,8 @@ class SACPolicy(
                     "action_entropy": -log_probs.mean().item(),
                     # Policy mean norm (before tanh), 监控Tanh饱和
                     "policy_mean_norm": means.norm(dim=-1).mean().item(),
+                    # Policy std mean, 监控策略方差 (越小说明策略越确定)
+                    "policy_std_mean": std.mean().item(),
                     # Q value for actor actions, 策略质量
                     "actor_q_mean": min_q_preds.mean().item(),
                 }
@@ -915,7 +923,7 @@ class Policy(nn.Module):
         self,
         observations: torch.Tensor,
         observation_features: torch.Tensor | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         # We detach the encoder if it is shared to avoid backprop through it
         # This is important to avoid the encoder to be updated through the policy
         obs_enc = self.encoder(observations, cache=observation_features, detach=self.encoder_is_shared)
@@ -941,7 +949,7 @@ class Policy(nn.Module):
         # Compute log_probs
         log_probs = dist.log_prob(actions)
 
-        return actions, log_probs, means
+        return actions, log_probs, means, std
 
     def get_features(self, observations: torch.Tensor) -> torch.Tensor:
         """Get encoded features from observations"""

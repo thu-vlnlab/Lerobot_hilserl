@@ -59,6 +59,7 @@ import time
 import sys
 import argparse
 from typing import Optional, Tuple, List
+from collections import deque
 from piper_sdk import C_PiperInterface_V2
 
 
@@ -110,7 +111,7 @@ class ControlConfig:
     GRIPPER_STEP = 1500         # 每次循环增量 (按住时持续变化)
 
     # 控制频率
-    CONTROL_FREQUENCY = 50  # Hz
+    CONTROL_FREQUENCY = 140 # Hz
 
 
 class ControllerState:
@@ -120,7 +121,20 @@ class ControllerState:
         self.enabled = False
         self.current_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]  # [X, Y, Z, RX, RY, RZ]
         self.target_pose = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]   # 目标位姿（累积）
+        self.last_sent_target_pose = None  # 上一帧发送的目标位姿
+        self.last_tracking_error = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.last_target_delta = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         self.target_velocity = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        self.actual_velocity = [0.0, 0.0, 0.0]  # 基于最近1秒位姿变化的实际速度(mm/s)
+        self.pose_history = deque(maxlen=500)   # (t, x, y, z)
+        self.feedback_hz = 0.0
+        self.last_feedback_stamp = None
+        self.last_pose = None
+        self.last_command_time = None  # 用于“消息延迟”
+        self.last_command_time_motion = None  # 用于“运动延迟”
+        self.last_command_has_move = False
+        self.last_motion_lag_ms = None
+        self.last_msg_lag_ms = None
         self.last_update_time = time.time()
         self.gripper_state = "idle"  # idle, opening, closing
         self.gripper_pos = 0  # 当前夹爪位置 (单位: 0.001mm)
@@ -166,10 +180,10 @@ class SafetyMonitor:
             unit = "mm" if i < 3 else "°"
             if target_pose[i] < limits[0] + self.config.SOFT_LIMIT_BUFFER:
                 distance = target_pose[i] - limits[0]
-                print(f"[WARNING] {axis}轴接近下限: 当前={target_pose[i]:.1f}{unit}, 限制={limits[0]}{unit}, 距离={distance:.1f}{unit}")
+                # print(f"[WARNING] {axis}轴接近下限: 当前={target_pose[i]:.1f}{unit}, 限制={limits[0]}{unit}, 距离={distance:.1f}{unit}")
             elif target_pose[i] > limits[1] - self.config.SOFT_LIMIT_BUFFER:
                 distance = limits[1] - target_pose[i]
-                print(f"[WARNING] {axis}轴接近上限: 当前={target_pose[i]:.1f}{unit}, 限制={limits[1]}{unit}, 距离={distance:.1f}{unit}")
+                # print(f"[WARNING] {axis}轴接近上限: 当前={target_pose[i]:.1f}{unit}, 限制={limits[1]}{unit}, 距离={distance:.1f}{unit}")
 
         return True, ""
 
@@ -480,6 +494,23 @@ class XboxArmController:
         self.state.target_velocity = [vel_x, vel_y, vel_z, vel_rx, vel_ry, vel_rz]
 
         # 计算位置增量
+        delta = [
+            vel_x * dt,
+            vel_y * dt,
+            vel_z * dt,
+            vel_rx * dt,
+            vel_ry * dt,
+            vel_rz * dt
+        ]
+        self.state.last_target_delta = delta
+        # 如果本帧指令有明显平移增量，记录指令时间用于估算延迟
+        if (delta[0] * delta[0] + delta[1] * delta[1] + delta[2] * delta[2]) ** 0.5 > 0.02:
+            # 记录发送“有移动意图”的指令时间，用于估算新反馈到达的延迟
+            now = time.time()
+            self.state.last_command_time = now
+            self.state.last_command_time_motion = now
+            self.state.last_command_has_move = True
+
         target = [
             current[0] + vel_x * dt,
             current[1] + vel_y * dt,
@@ -494,6 +525,9 @@ class XboxArmController:
     def send_control_command(self, target_pose: List[float]):
         """发送控制命令到机械臂"""
         try:
+            # 记录本帧发送的目标位姿，用于下一帧计算跟踪误差
+            self.state.last_sent_target_pose = target_pose.copy()
+
             # 转换单位：mm → 0.001mm, deg → 0.001deg
             X = int(target_pose[0] * 1000)
             Y = int(target_pose[1] * 1000)
@@ -588,6 +622,7 @@ class XboxArmController:
     def update_current_pose(self):
         """读取当前机械臂位姿"""
         try:
+            now = time.time()
             end_pose = self.piper.GetArmEndPoseMsgs()
             self.state.current_pose = [
                 end_pose.end_pose.X_axis / 1000.0,
@@ -598,24 +633,103 @@ class XboxArmController:
                 end_pose.end_pose.RZ_axis / 1000.0
             ]
             # 成功读取位姿，更新看门狗时间戳
-            self.safety.last_can_communication = time.time()
+            self.safety.last_can_communication = now
+
+            # 反馈频率使用 SDK 统计（来自 CAN 反馈包）
+            self.state.feedback_hz = end_pose.Hz
+
+            # 记录反馈包时间戳变化，用于估算“命令->新反馈”延迟
+            if end_pose.time_stamp != 0:
+                if self.state.last_feedback_stamp is None:
+                    self.state.last_feedback_stamp = end_pose.time_stamp
+                elif end_pose.time_stamp != self.state.last_feedback_stamp:
+                    if self.state.last_command_time is not None:
+                        self.state.last_msg_lag_ms = (now - self.state.last_command_time) * 1000.0
+                        self.state.last_command_time = None
+                    self.state.last_feedback_stamp = end_pose.time_stamp
+
+            # 更新位姿历史，用于计算实际速度
+            self.state.pose_history.append((now, self.state.current_pose[0],
+                                            self.state.current_pose[1],
+                                            self.state.current_pose[2]))
+            self._update_actual_velocity(now)
+
+            # 估计指令到运动的延迟（第一次检测到运动时记录）
+            if self.state.last_pose is not None and self.state.last_command_has_move:
+                dx = self.state.current_pose[0] - self.state.last_pose[0]
+                dy = self.state.current_pose[1] - self.state.last_pose[1]
+                dz = self.state.current_pose[2] - self.state.last_pose[2]
+                moved = (dx * dx + dy * dy + dz * dz) ** 0.5
+                if moved > 0.02 and self.state.last_command_time_motion is not None:
+                    self.state.last_motion_lag_ms = (now - self.state.last_command_time_motion) * 1000.0
+                    self.state.last_command_has_move = False
+
+            self.state.last_pose = self.state.current_pose.copy()
         except Exception as e:
             print(f"[ERROR] 读取位姿失败: {e}")
             self.safety.consecutive_errors += 1
+
+    def _update_actual_velocity(self, now: float):
+        """基于最近1秒位姿变化估计实际速度(mm/s)"""
+        if len(self.state.pose_history) < 2:
+            return
+        # 找到1秒前最接近的样本
+        target_time = now - 1.0
+        oldest = None
+        for t, x, y, z in self.state.pose_history:
+            if t <= target_time:
+                oldest = (t, x, y, z)
+            else:
+                break
+        # 若不足1秒，使用最早样本
+        if oldest is None:
+            oldest = self.state.pose_history[0]
+
+        t0, x0, y0, z0 = oldest
+        dt = now - t0
+        if dt <= 1e-6:
+            return
+        dx = self.state.current_pose[0] - x0
+        dy = self.state.current_pose[1] - y0
+        dz = self.state.current_pose[2] - z0
+        self.state.actual_velocity = [dx / dt, dy / dt, dz / dt]
 
     def update_display(self):
         """更新状态显示"""
         pose = self.state.current_pose
         vel = self.state.target_velocity
+        err = self.state.last_tracking_error
+        delta = self.state.last_target_delta
+        aval = self.state.actual_velocity
+        fb_hz = self.state.feedback_hz
+        lag_ms = self.state.last_motion_lag_ms
+        msg_lag_ms = self.state.last_msg_lag_ms
         enabled_str = "已使能" if self.state.enabled else "未使能"
         gripper_mm = self.state.gripper_pos / 1000.0  # 转换为 mm
 
         freq = self.config.CONTROL_FREQUENCY
 
+        # 仅显示平移相关量，统一用毫米，避免角度单位混淆
+
+        # 误差百分比（以增量为分母，使用绝对值避免符号误导）
+        def _pct(e: float, d: float) -> float:
+            return 0.0 if abs(d) < 1e-6 else (abs(e) / abs(d)) * 100.0
+
+        pct_x = _pct(err[0], delta[0])
+        pct_y = _pct(err[1], delta[1])
+        pct_z = _pct(err[2], delta[2])
+
+        lag_str = "--" if lag_ms is None else f"{lag_ms:.0f}"
+        msg_lag_str = "--" if msg_lag_ms is None else f"{msg_lag_ms:.0f}"
+
         status = (f"[{enabled_str}] 频率:{freq}Hz | "
-                 f"位姿:X={pose[0]:.0f}/Y={pose[1]:.0f}/Z={pose[2]:.0f}/"
-                 f"RX={pose[3]:.0f}/RY={pose[4]:.0f}/RZ={pose[5]:.0f} | "
-                 f"速度:vX={vel[0]:.0f}/vY={vel[1]:.0f}/vZ={vel[2]:.0f} | "
+                 f"位姿(mm):X={pose[0]:.0f}/Y={pose[1]:.0f}/Z={pose[2]:.0f} | "
+                 f"增量(mm):dX={delta[0]:.1f}/dY={delta[1]:.1f}/dZ={delta[2]:.1f} | "
+                 f"误差(mm):eX={err[0]:.1f}/eY={err[1]:.1f}/eZ={err[2]:.1f} | "
+                 f"误差(%):pX={pct_x:.0f}/pY={pct_y:.0f}/pZ={pct_z:.0f} | "
+                 f"目标速度(mm/s):vX={vel[0]:.0f}/vY={vel[1]:.0f}/vZ={vel[2]:.0f} | "
+                 f"实际速度(mm/s):aX={aval[0]:.0f}/aY={aval[1]:.0f}/aZ={aval[2]:.0f} | "
+                 f"反馈:{fb_hz:.0f}Hz/延迟:{lag_str}ms/消息:{msg_lag_str}ms | "
                  f"[夹爪:{gripper_mm:.1f}mm]")
 
         # 使用\r返回行首，实现同行更新
@@ -664,6 +778,13 @@ class XboxArmController:
 
                         # 更新当前位姿
                         self.update_current_pose()
+
+                        # 计算上一帧目标 vs 当前位姿的跟踪误差
+                        if self.state.last_sent_target_pose is not None:
+                            self.state.last_tracking_error = [
+                                self.state.last_sent_target_pose[i] - self.state.current_pose[i]
+                                for i in range(6)
+                            ]
 
                         # 计算目标位姿
                         dt = time.time() - self.state.last_update_time

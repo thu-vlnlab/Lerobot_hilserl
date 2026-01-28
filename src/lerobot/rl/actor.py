@@ -290,8 +290,22 @@ def act_with_policy(
         # Time policy inference and check if it meets FPS requirement
         with policy_timer:
             # Extract observation from transition for policy
-            action = policy.select_action(batch=observation)
+            action, action_mean, action_std = policy.select_action(
+                batch=observation, return_distribution_params=True
+            )
         policy_fps = policy_timer.fps_last
+
+        # DEBUG: 打印 Policy 分布参数 (mean, std) 和实际采样的 action
+        action_np = action.cpu().numpy().flatten()
+        mean_np = action_mean.cpu().numpy().flatten()
+        std_np = action_std.cpu().numpy().flatten()
+        state = observation.get('observation.state', None)
+        if state is not None:
+            state_np = state.cpu().numpy().flatten()
+            print(f"[Step {interaction_step}] EE:[{state_np[0]:.3f},{state_np[1]:.3f},{state_np[2]:.3f}] "
+                  f"Mean:[{mean_np[0]:.3f},{mean_np[1]:.3f},{mean_np[2]:.3f}] "
+                  f"Std:[{std_np[0]:.4f},{std_np[1]:.4f},{std_np[2]:.4f}] "
+                  f"Action:[{action_np[0]:.3f},{action_np[1]:.3f},{action_np[2]:.3f}]")
 
         log_policy_frequency_issue(policy_fps=policy_fps, cfg=cfg, interaction_step=interaction_step)
 
