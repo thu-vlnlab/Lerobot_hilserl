@@ -1,0 +1,6 @@
+ARMIP = "192.168.5.138"
+ARMPORT = 8080
+CONTROLRATE = 50
+CAMSERIALS = ["CV2TC510009A","CV2TC5100055"]
+REPO = "cutting"
+REPOROOT = "/home/ubuntu/dataset/cutting"
