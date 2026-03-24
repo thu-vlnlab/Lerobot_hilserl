@@ -76,7 +76,7 @@ class LerobotDataCollect(Node):
                 root=self.dataset_root,
                 features={
                     "observation.cam_wrist": {"dtype": "video", "shape": [480, 640, 3], "names": ["height", "width", "channels"]},
-                    "observation.cam_thrid_part": {"dtype": "video", "shape": [480, 640, 3], "names": ["height", "width", "channels"]},
+                    "observation.cam_thrid_Nodepart": {"dtype": "video", "shape": [480, 640, 3], "names": ["height", "width", "channels"]},
                     "observation.state": {"dtype": "float32", "shape": (3,), "names": ["x", "y", "z"]},
                     "tactile": {"dtype": "float32", "shape": (1,), "names": ["mf"]},
                     "action": {"dtype": "float32", "shape": (3,), "names": ["x", "y", "z"]},

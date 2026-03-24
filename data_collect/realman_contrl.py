@@ -3,7 +3,6 @@ import math
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray
-import pyspacemouse
 from Robotic_Arm.rm_robot_interface import *
 from teleop_config import *
 import numpy as np
