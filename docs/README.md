@@ -16,6 +16,10 @@ limitations under the License.
 
 # Generating the documentation
 
+## Project-specific docs
+
+- `RM75_6F_HILSERL_PLAN.md`: RM75-6F 接入 `Lerobot_hilserl` 的说明、任务清单与修改方案
+
 To generate the documentation, you first have to build it. Several packages are necessary to build the doc,
 you can install them with the following command, at the root of the code repository:
 

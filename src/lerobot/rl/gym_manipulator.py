@@ -155,6 +155,14 @@ def reset_follower_position(robot_arm: Robot, target_position: np.ndarray) -> No
 
         # Switch back to end-effector control mode if needed
         robot_arm._piper.MotionCtrl_2(0x01, 0x00, 50, 0x00)
+    # For RM75 robots - blocking joint-space reset
+    elif hasattr(robot_arm, '_arm') and hasattr(robot_arm._arm, 'go_home'):
+        target_joints_deg = target_position[:7].tolist()
+        robot_arm._arm.go_home(joints_deg=target_joints_deg)
+        if len(target_position) > 7:
+            robot_arm._arm.set_gripper_position(float(target_position[7]))
+        if hasattr(robot_arm, '_fixed_orientation'):
+            robot_arm._fixed_orientation = None
     else:
         logging.warning("reset_follower_position: Unknown robot type, skipping reset")
 
@@ -548,13 +556,24 @@ def make_processors(
     # Check if robot uses end-effector control (e.g., PiperFollowerEndEffector)
     uses_ee_control = hasattr(env.robot, 'action_features') and "ee.x" in env.robot.action_features
 
-    # For Piper with end-effector control and no IK, add delta to absolute converter
+    # For robots with end-effector control and no IK, add delta to absolute converter
     if uses_ee_control and cfg.processor.inverse_kinematics is None:
         max_gripper = cfg.processor.max_gripper_pos if cfg.processor.max_gripper_pos else 70.0
+        ee_bounds = {"x_min": 0.136, "x_max": 0.38, "y_min": -0.159, "y_max": 0.220, "z_min": 0.135, "z_max": 0.3}
+        # Read bounds from robot config if available (e.g., RM75)
+        if hasattr(env.robot, 'config') and hasattr(env.robot.config, 'workspace_bounds'):
+            wb = env.robot.config.workspace_bounds
+            ee_bounds = {
+                "x_min": wb["min"][0], "x_max": wb["max"][0],
+                "y_min": wb["min"][1], "y_max": wb["max"][1],
+                "z_min": wb["min"][2], "z_max": wb["max"][2],
+            }
+            max_gripper = getattr(env.robot.config, 'gripper_open_pos', max_gripper)
         action_pipeline_steps.append(
             PiperDeltaToAbsoluteEEStep(
-                ee_step_size=0.02,  # 2cm per delta unit
+                ee_step_size=0.02,
                 max_gripper_pos=max_gripper,
+                ee_bounds=ee_bounds,
             )
         )
 
