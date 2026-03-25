@@ -123,14 +123,19 @@ class SpaceMouseTeleop(Teleoperator):
             "delta_z": np.float32(delta_z),
         }
 
-        if self.config.use_suction:
-            # Edge-triggered toggle: button press (off→on edge) flips suction state
+        # Always track suction toggle when button is configured (even if use_suction=False).
+        # suction.state is always emitted into action_dict as a side channel so the
+        # robot can physically actuate the relay even when not recording it to the dataset.
+        if self.config.suction_toggle_button >= 0:
             btn_cur = bool(self.reader.get_button(self.config.suction_toggle_button))
             if btn_cur and not self._suction_btn_prev:
                 self._suction_state = not self._suction_state
-                logger.info(f"Suction toggled: {'ON' if self._suction_state else 'OFF'}")
+                print(f"[SUCTION-TELEOP] button press → _suction_state={self._suction_state}")
             self._suction_btn_prev = btn_cur
             action_dict["suction.state"] = np.float32(1.0 if self._suction_state else 0.0)
+
+        if self.config.use_suction:
+            pass  # suction.state already added above; use_suction=True means it also enters action_features
         elif self.config.use_gripper:
             # Button 0 = close, Button 1 = open, neither = stay
             btn_close = self.reader.get_button(self.config.gripper_close_button)

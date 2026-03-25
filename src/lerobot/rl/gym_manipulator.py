@@ -570,7 +570,12 @@ def make_processors(
                     "y_min": wb["min"][1], "y_max": wb["max"][1],
                     "z_min": wb["min"][2], "z_max": wb["max"][2],
                 }
-            ee_use_suction = getattr(getattr(env.robot, 'config', None), 'enable_suction', False)
+            # use_suction controls whether suction enters the ACTION TENSOR (policy action space).
+            # Use teleop's use_suction (not robot's enable_suction) — robot may have hardware
+            # connected but still exclude suction from action space for BC/RL policy.
+            # Physical relay is handled via side-channel regardless of this flag.
+            _teleop_cfg = getattr(teleop_device, 'config', None)
+            ee_use_suction = getattr(_teleop_cfg, 'use_suction', False)
             action_pipeline_steps.append(
                 RM75DeltaToAbsoluteEEStep(
                     ee_step_size=1.0,
@@ -676,6 +681,18 @@ def step_env_and_process_transition(
     processed_action = processed_action_transition[TransitionKey.ACTION]
 
     obs, reward, terminated, truncated, info = env.step(processed_action)
+
+    # Side-channel suction: read _suction_state directly from the teleop object
+    # (InterventionActionProcessorStep converts the teleop dict to a tensor, losing suction.state)
+    _suction_ctrl = getattr(getattr(env, 'robot', None), '_suction', None)
+    if _suction_ctrl is not None:
+        _teleop = None
+        for _step in action_processor.steps:
+            if hasattr(_step, 'teleop_device'):
+                _teleop = _step.teleop_device
+                break
+        if _teleop is not None and hasattr(_teleop, '_suction_state'):
+            _suction_ctrl.set_state(bool(_teleop._suction_state))
 
     reward = reward + processed_action_transition[TransitionKey.REWARD]
     terminated = terminated or processed_action_transition[TransitionKey.DONE]

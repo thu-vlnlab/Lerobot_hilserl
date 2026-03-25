@@ -47,6 +47,8 @@ class SuctionController:
 
     def set_state(self, on: bool) -> None:
         """Activate (on=True) or deactivate (on=False) the suction head."""
+        if on == self._state:
+            return  # no change — skip serial write to avoid relay clicking
         if self._serial is None or not self._serial.is_open:
             logger.warning("SuctionController: serial not open, skipping set_state")
             return
@@ -55,7 +57,7 @@ class SuctionController:
         check = (0xA0 + ch + op) & 0xFF
         self._serial.write(bytes([0xA0, ch, op, check]))
         self._state = on
-        logger.debug(f"SuctionController: {'ON' if on else 'OFF'}")
+        print(f"[SUCTION] relay {'ON' if on else 'OFF'}")
 
     def get_state(self) -> bool:
         return self._state
