@@ -15,6 +15,10 @@
 # limitations under the License.
 
 import logging
+import select
+import sys
+import termios
+import tty
 from enum import IntEnum
 from typing import Any
 
@@ -50,10 +54,19 @@ class SpaceMouseTeleop(Teleoperator):
         self.config = config
         self.robot_type = config.type
         self.reader: SpaceMouseReader | None = None
+        self._old_term_settings = None
+        self._suction_state: bool = False
+        self._suction_btn_prev: bool = False  # for edge detection
 
     @property
     def action_features(self) -> dict:
-        if self.config.use_gripper:
+        if self.config.use_suction:
+            return {
+                "dtype": "float32",
+                "shape": (4,),
+                "names": {"delta_x": 0, "delta_y": 1, "delta_z": 2, "suction.state": 3},
+            }
+        elif self.config.use_gripper:
             return {
                 "dtype": "float32",
                 "shape": (4,),
@@ -77,7 +90,16 @@ class SpaceMouseTeleop(Teleoperator):
         )
         self.reader.open()
         self.reader.start()
+
+        # Set terminal to raw mode for non-blocking keyboard read
+        try:
+            self._old_term_settings = termios.tcgetattr(sys.stdin)
+            tty.setcbreak(sys.stdin.fileno())
+        except Exception:
+            self._old_term_settings = None
+
         logger.info("SpaceMouseTeleop connected.")
+        logger.info("Keyboard: Enter=成功结束  Backspace=重录  q=退出")
 
     def get_action(self) -> dict[str, Any]:
         raw_axes = self.reader.get_axes()  # [x, y, z, rx, ry, rz] raw with deadzone
@@ -101,7 +123,15 @@ class SpaceMouseTeleop(Teleoperator):
             "delta_z": np.float32(delta_z),
         }
 
-        if self.config.use_gripper:
+        if self.config.use_suction:
+            # Edge-triggered toggle: button press (off→on edge) flips suction state
+            btn_cur = bool(self.reader.get_button(self.config.suction_toggle_button))
+            if btn_cur and not self._suction_btn_prev:
+                self._suction_state = not self._suction_state
+                logger.info(f"Suction toggled: {'ON' if self._suction_state else 'OFF'}")
+            self._suction_btn_prev = btn_cur
+            action_dict["suction.state"] = np.float32(1.0 if self._suction_state else 0.0)
+        elif self.config.use_gripper:
             # Button 0 = close, Button 1 = open, neither = stay
             btn_close = self.reader.get_button(self.config.gripper_close_button)
             btn_open = self.reader.get_button(self.config.gripper_open_button)
@@ -130,15 +160,48 @@ class SpaceMouseTeleop(Teleoperator):
         axes = self.reader.get_axes()
         is_intervention = any(a != 0 for a in axes[:3])  # Only check translation axes
 
-        # SpaceMouse has only 2 buttons, so episode events are handled by keyboard
+        # Non-blocking keyboard check for episode events
+        terminate = False
+        success = False
+        rerecord = False
+        key = self._read_key()
+        if key == "\n" or key == "\r":  # Enter = success
+            success = True
+            terminate = True
+            logger.info("Keyboard: Enter pressed → episode SUCCESS")
+        elif key == "\x7f" or key == "\x08":  # Backspace = rerecord
+            rerecord = True
+            terminate = True
+            logger.info("Keyboard: Backspace pressed → RERECORD episode")
+        elif key == "q":  # q = terminate (no success)
+            terminate = True
+            logger.info("Keyboard: q pressed → TERMINATE episode")
+
         return {
             TeleopEvents.IS_INTERVENTION: is_intervention,
-            TeleopEvents.TERMINATE_EPISODE: False,
-            TeleopEvents.SUCCESS: False,
-            TeleopEvents.RERECORD_EPISODE: False,
+            TeleopEvents.TERMINATE_EPISODE: terminate,
+            TeleopEvents.SUCCESS: success,
+            TeleopEvents.RERECORD_EPISODE: rerecord,
         }
 
+    def _read_key(self) -> str | None:
+        """Non-blocking single key read from stdin."""
+        try:
+            if select.select([sys.stdin], [], [], 0)[0]:
+                return sys.stdin.read(1)
+        except Exception:
+            pass
+        return None
+
     def disconnect(self) -> None:
+        # Restore terminal settings
+        if self._old_term_settings is not None:
+            try:
+                termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self._old_term_settings)
+            except Exception:
+                pass
+            self._old_term_settings = None
+
         if self.reader is not None:
             self.reader.stop()
             self.reader = None

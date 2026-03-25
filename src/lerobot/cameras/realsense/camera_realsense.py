@@ -526,15 +526,19 @@ class RealSenseCamera(Camera):
         if self.thread is None or not self.thread.is_alive():
             self._start_read_thread()
 
-        if not self.new_frame_event.wait(timeout=timeout_ms / 1000.0):
-            thread_alive = self.thread is not None and self.thread.is_alive()
-            raise TimeoutError(
-                f"Timed out waiting for frame from camera {self} after {timeout_ms} ms. "
-                f"Read thread alive: {thread_alive}."
-            )
-
         with self.frame_lock:
             frame = self.latest_frame
+
+        if frame is None:
+            # No frame yet — block until first frame arrives (warm-up)
+            if not self.new_frame_event.wait(timeout=timeout_ms / 1000.0):
+                thread_alive = self.thread is not None and self.thread.is_alive()
+                raise TimeoutError(
+                    f"Timed out waiting for frame from camera {self} after {timeout_ms} ms. "
+                    f"Read thread alive: {thread_alive}."
+                )
+            with self.frame_lock:
+                frame = self.latest_frame
             self.new_frame_event.clear()
 
         if frame is None:

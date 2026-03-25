@@ -53,8 +53,8 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 
 _COMMON_LIBSPNAV_PATHS = [
     # 优先查找本目录下的 bundled 版本（便于跨机器部署）
-    os.path.join(_HERE, "libspnav.so.0"),
     os.path.join(_HERE, "libspnav.so.0.4"),
+    os.path.join(_HERE, "libspnav.so.0"),
     # 系统路径
     "libspnav.so.0",
     "libspnav.so",
@@ -69,14 +69,14 @@ def _find_libspnav(lib_path: str | None = None) -> str:
     """Resolve libspnav library path."""
     if lib_path is not None:
         return lib_path
-    # Try ctypes.util first
-    found = ctypes.util.find_library("spnav")
-    if found:
-        return found
-    # Try common paths
+    # Try common paths first (bundled version takes priority over system)
     for path in _COMMON_LIBSPNAV_PATHS:
         if os.path.isfile(path):
             return path
+    # Fall back to ctypes.util
+    found = ctypes.util.find_library("spnav")
+    if found:
+        return found
     raise FileNotFoundError(
         "Cannot find libspnav. Install it with: sudo apt install libspnav-dev spacenavd"
     )

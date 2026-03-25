@@ -31,7 +31,7 @@ class RM75FollowerConfig(RobotConfig):
     """
 
     # Robot TCP connection
-    robot_ip: str = "192.168.5.18"
+    robot_ip: str = "192.168.1.18"
     robot_port: int = 8080
 
     # Gripper
@@ -87,3 +87,9 @@ class RM75FollowerEndEffectorConfig(RM75FollowerConfig):
 
     # Lock orientation to initial pose (first-call lock)
     lock_orientation: bool = True
+
+    # Suction head (USB relay controller)
+    enable_suction: bool = False
+    suction_port: str = "/dev/ttyUSB0"
+    suction_baud_rate: int = 9600
+    suction_channel: int = 1

@@ -49,3 +49,7 @@ class SpaceMouseTeleopConfig(TeleoperatorConfig):
     # Button assignments for gripper
     gripper_close_button: int = 0
     gripper_open_button: int = 1
+
+    # Suction head toggle (single button, press = flip on↔off)
+    use_suction: bool = False
+    suction_toggle_button: int = 0

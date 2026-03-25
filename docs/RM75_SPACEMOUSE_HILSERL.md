@@ -132,7 +132,7 @@ ping 192.168.5.18
 from lerobot.robots.rm75_follower import RM75FollowerEndEffector, RM75FollowerEndEffectorConfig
 
 config = RM75FollowerEndEffectorConfig(
-    robot_ip="192.168.5.18",
+    robot_ip="192.168.1.18",
     robot_port=8080,
 )
 robot = RM75FollowerEndEffector(config)
@@ -152,6 +152,7 @@ robot.disconnect()
 
 ```python
 from lerobot.teleoperators.spacemouse import SpaceMouseTeleop, SpaceMouseTeleopConfig
+from lerobot.teleoperators.utils import TeleopEvents
 
 config = SpaceMouseTeleopConfig()
 teleop = SpaceMouseTeleop(config)
@@ -163,7 +164,7 @@ for _ in range(100):
     events = teleop.get_teleop_events()
     print(f"delta: ({action['delta_x']:.4f}, {action['delta_y']:.4f}, {action['delta_z']:.4f})"
           f"  gripper: {action.get('gripper', '-')}"
-          f"  intervening: {events['is_intervention']}")
+          f"  intervening: {events[TeleopEvents.IS_INTERVENTION]}")
     time.sleep(0.02)
 
 teleop.disconnect()
@@ -175,7 +176,7 @@ teleop.disconnect()
 from lerobot.robots.rm75_follower import RM75FollowerEndEffector, RM75FollowerEndEffectorConfig
 from lerobot.teleoperators.spacemouse import SpaceMouseTeleop, SpaceMouseTeleopConfig
 
-robot_config = RM75FollowerEndEffectorConfig(robot_ip="192.168.5.18")
+robot_config = RM75FollowerEndEffectorConfig(robot_ip="192.168.1.18")
 robot = RM75FollowerEndEffector(robot_config)
 robot.connect()
 
@@ -192,9 +193,9 @@ try:
 
         # 将 delta 转为绝对位置
         target = {
-            "ee.x": obs["ee.x"] + action["delta_x"] * 0.02,
-            "ee.y": obs["ee.y"] + action["delta_y"] * 0.02,
-            "ee.z": obs["ee.z"] + action["delta_z"] * 0.02,
+            "ee.x": obs["ee.x"] + action["delta_x"] * 0.001,
+            "ee.y": obs["ee.y"] + action["delta_y"] * 0.001,
+            "ee.z": obs["ee.z"] + action["delta_z"] * 0.001,
             "gripper.pos": obs["gripper.pos"],
         }
 
@@ -228,7 +229,7 @@ robot.disconnect()
         "type": "real",
         "robot": {
             "type": "rm75_follower_ee",
-            "robot_ip": "192.168.5.18",
+            "robot_ip": "192.168.1.18",
             "robot_port": 8080,
             "enable_gripper": true,
             "workspace_bounds": {

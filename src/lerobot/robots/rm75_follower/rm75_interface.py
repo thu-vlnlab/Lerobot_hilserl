@@ -9,6 +9,8 @@ import math
 import time
 from typing import List, Union
 
+import serial
+
 import numpy as np
 
 from Robotic_Arm.rm_robot_interface import (
@@ -18,6 +20,56 @@ from Robotic_Arm.rm_robot_interface import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class SuctionController:
+    """USB relay controller for suction head (solenoid valve).
+
+    Protocol: hex command  A0 CH OP CHECK
+        CH    = channel number (1-indexed)
+        OP    = 0x01 (relay ON / suction active) or 0x00 (relay OFF / release)
+        CHECK = 0xA0 + CH + OP  (simple checksum)
+
+    Compatible with common USB-UART relay boards (e.g., SainSmart).
+    """
+
+    def __init__(self, port: str = "/dev/ttyUSB0", baud: int = 9600, channel: int = 1):
+        self.port = port
+        self.baud = baud
+        self.channel = channel
+        self._serial: serial.Serial | None = None
+        self._state: bool = False  # current suction state (True = ON)
+
+    def connect(self) -> None:
+        self._serial = serial.Serial(self.port, self.baud, timeout=0.5)
+        time.sleep(0.1)  # allow serial hardware to stabilise
+        logger.info(f"SuctionController connected on {self.port} ch={self.channel}")
+
+    def set_state(self, on: bool) -> None:
+        """Activate (on=True) or deactivate (on=False) the suction head."""
+        if self._serial is None or not self._serial.is_open:
+            logger.warning("SuctionController: serial not open, skipping set_state")
+            return
+        op = 0x01 if on else 0x00
+        ch = self.channel
+        check = (0xA0 + ch + op) & 0xFF
+        self._serial.write(bytes([0xA0, ch, op, check]))
+        self._state = on
+        logger.debug(f"SuctionController: {'ON' if on else 'OFF'}")
+
+    def get_state(self) -> bool:
+        return self._state
+
+    def disconnect(self) -> None:
+        if self._serial and self._serial.is_open:
+            try:
+                self.set_state(False)   # safety: release on disconnect
+            except Exception:
+                pass
+            self._serial.close()
+        self._serial = None
+        logger.info("SuctionController disconnected.")
+
 
 DEG_TO_RAD = math.pi / 180.0
 RAD_TO_DEG = 180.0 / math.pi
@@ -43,7 +95,7 @@ class RM75BInterface:
     with ZhiXing 90D gripper controlled via Modbus RTU over the arm's end-effector RS485.
     """
 
-    def __init__(self, ip: str = "192.168.5.18", port: int = 8080, enable_gripper: bool = True):
+    def __init__(self, ip: str = "192.168.1.18", port: int = 8080, enable_gripper: bool = False):
         self.ip = ip
         self.port = port
         self.enable_gripper = enable_gripper
@@ -85,16 +137,28 @@ class RM75BInterface:
     def get_current_pose(self) -> list[float]:
         """Return current end-effector pose as [x, y, z, rx, ry, rz].
         Position in meters, orientation in radians."""
-        ret = self.arm.rm_get_current_arm_state()
-        if ret[0] != 0:
-            logger.warning(f"rm_get_current_arm_state returned {ret[0]}")
+        ret, pose = self.arm.rm_get_current_arm_state()
+        if ret != 0:
+            logger.warning(f"rm_get_current_arm_state returned {ret}")
             return [0.0] * 6
-        # ret[1] = joint degrees, ret[2] = pose dict {position: [x,y,z], euler: [rx,ry,rz]}
-        pose = ret[2]
-        # position is in meters already, euler angles in radians
-        pos = pose["position"]
-        euler = pose["euler"]
-        return [pos[0], pos[1], pos[2], euler[0], euler[1], euler[2]]
+        # pose dict contains "pose": [x, y, z, rx, ry, rz] (meters + radians)
+        pos = pose["pose"]
+        return [pos[0], pos[1], pos[2], pos[3], pos[4], pos[5]]
+
+    def get_full_state(self) -> tuple[np.ndarray, list[float]]:
+        """Single SDK call returning (joints_rad, pose).
+        Avoids separate rm_get_joint_degree + rm_get_current_arm_state calls.
+        Returns: (joints shape (7,) in radians, [x,y,z,rx,ry,rz])
+        """
+        ret, state = self.arm.rm_get_current_arm_state()
+        if ret != 0:
+            logger.warning(f"rm_get_current_arm_state returned {ret}")
+            return np.zeros(7), [0.0] * 6
+        pose = state["pose"]
+        # rm_get_current_arm_state also returns joint angles in degrees under "joint"
+        joints_deg = state.get("joint", [0.0] * 7)
+        joints_rad = np.array(joints_deg[:7]) * DEG_TO_RAD
+        return joints_rad, [pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]]
 
     def movep_canfd(self, pose: list[float], follow: bool = True):
         """Send Cartesian pose command via rm_movep_canfd.

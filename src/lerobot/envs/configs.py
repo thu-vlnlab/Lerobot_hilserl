@@ -237,6 +237,10 @@ class HILSerlRobotEnvConfig(EnvConfig):
 
     name: str = "real_robot"
 
+    # Data recording frequency (Hz). None = same as fps (control frequency).
+    # Allows control at high frequency (e.g. 100 Hz) while recording at lower rate (e.g. 30 Hz).
+    record_fps: int | None = None
+
     @property
     def gym_kwargs(self) -> dict:
         return {}

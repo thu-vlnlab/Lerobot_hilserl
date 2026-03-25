@@ -27,7 +27,7 @@ from lerobot.utils.errors import DeviceAlreadyConnectedError, DeviceNotConnected
 
 from ..robot import Robot
 from .config_rm75_follower import RM75FollowerConfig, RM75FollowerEndEffectorConfig
-from .rm75_interface import RM75BInterface
+from .rm75_interface import RM75BInterface, SuctionController
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +181,8 @@ class RM75FollowerEndEffector(RM75Follower):
         super().__init__(config)
         self.config = config
         self._fixed_orientation: list[float] | None = None
+        self._suction: SuctionController | None = None
+        self._last_pose: list[float] = [0.0] * 6  # cached; updated each get_observation()
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
@@ -193,28 +195,59 @@ class RM75FollowerEndEffector(RM75Follower):
             "ee.ry": float,
             "ee.rz": float,
         }
+        if self.config.enable_suction:
+            ee_features["suction.state"] = float
         return {**base_features, **ee_features}
 
     @cached_property
     def action_features(self) -> dict[str, type]:
-        return {
-            "ee.x": float,
-            "ee.y": float,
-            "ee.z": float,
-            "gripper.pos": float,
-        }
+        features = {"ee.x": float, "ee.y": float, "ee.z": float}
+        if self.config.enable_suction:
+            features["suction.state"] = float
+        return features
+
+    def connect(self, calibrate: bool = True) -> None:
+        super().connect(calibrate=calibrate)
+        if self.config.enable_suction:
+            self._suction = SuctionController(
+                port=self.config.suction_port,
+                baud=self.config.suction_baud_rate,
+                channel=self.config.suction_channel,
+            )
+            self._suction.connect()
+            logger.info("SuctionController connected.")
 
     def get_observation(self) -> dict[str, Any]:
-        obs_dict = super().get_observation()
+        if not self.is_connected:
+            raise DeviceNotConnectedError(f"{self} is not connected.")
 
+        obs_dict = {}
+
+        # Single SDK call → joints + EE pose (avoids separate rm_get_joint_degree call)
         if self._arm is not None:
-            pose = self._arm.get_current_pose()  # [x, y, z, rx, ry, rz] in meters/radians
+            joints_rad, pose = self._arm.get_full_state()
+            joints_deg = joints_rad * RAD_TO_DEG
+            for i, joint_name in enumerate(self.JOINT_NAMES):
+                obs_dict[f"{joint_name}.pos"] = float(joints_deg[i])
             obs_dict["ee.x"] = pose[0]
             obs_dict["ee.y"] = pose[1]
             obs_dict["ee.z"] = pose[2]
             obs_dict["ee.rx"] = pose[3]
             obs_dict["ee.ry"] = pose[4]
             obs_dict["ee.rz"] = pose[5]
+            self._last_pose = pose  # cache for step_env_and_process_transition
+
+        # Gripper (only if enabled and not using suction)
+        if self.config.enable_gripper:
+            obs_dict["gripper.pos"] = self._arm.get_gripper_position()
+
+        # Suction
+        if self.config.enable_suction and self._suction is not None:
+            obs_dict["suction.state"] = float(self._suction.get_state())
+
+        # Camera images
+        for cam_key, cam in self.cameras.items():
+            obs_dict[cam_key] = cam.async_read()
 
         return obs_dict
 
@@ -230,13 +263,10 @@ class RM75FollowerEndEffector(RM75Follower):
                 f"Fixed orientation locked: rx={pose[3]:.4f}, ry={pose[4]:.4f}, rz={pose[5]:.4f}"
             )
 
-        # Get current pose for defaults
-        current_pose = self._arm.get_current_pose()
-
-        # Target position from action (meters)
-        target_x = action.get("ee.x", current_pose[0])
-        target_y = action.get("ee.y", current_pose[1])
-        target_z = action.get("ee.z", current_pose[2])
+        # Target position from action (meters) — absolute EE coordinates
+        target_x = float(action.get("ee.x", 0.0))
+        target_y = float(action.get("ee.y", 0.0))
+        target_z = float(action.get("ee.z", 0.0))
 
         # Clip to workspace bounds
         wb = self.config.workspace_bounds
@@ -251,13 +281,17 @@ class RM75FollowerEndEffector(RM75Follower):
         target_pose = [target_x, target_y, target_z, rx, ry, rz]
         self._arm.movep_canfd(target_pose, follow=True)
 
-        # Gripper
-        gripper_goal = action.get("gripper.pos", None)
-        if gripper_goal is not None:
-            self._arm.set_gripper_position(float(gripper_goal))
+        # Suction
+        if self.config.enable_suction and self._suction is not None:
+            suction_val = action.get("suction.state", None)
+            if suction_val is not None:
+                self._suction.set_state(float(suction_val) > 0.5)
 
         return action
 
     def disconnect(self) -> None:
         self._fixed_orientation = None
+        if self._suction is not None:
+            self._suction.disconnect()
+            self._suction = None
         super().disconnect()

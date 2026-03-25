@@ -1,0 +1,53 @@
+{
+    "env": {
+        "fps": 20,
+        "record_fps": 20,
+        "robot": {
+            "type": "rm75_follower_ee",
+            "robot_ip": "192.168.1.18",
+            "robot_port": 8080,
+            "enable_gripper": false,
+            "enable_suction": false,
+            "suction_port": "/dev/ttyUSB0",
+            "workspace_bounds": {
+                "min": [-0.5, -0.5, 0.0],
+                "max": [0.5, 0.5, 0.7]
+            },
+            "cameras": {
+                "front": {
+                    "type": "intelrealsense",
+                    "serial_number_or_name": "352122273493",
+                    "width": 640,
+                    "height": 480,
+                    "fps": 30
+                }
+            }
+        },
+        "teleop": {
+            "type": "spacemouse",
+            "deadzone": 40,
+            "translation_scale": 0.000012,
+            "use_gripper": false,
+            "use_suction": false,
+            "suction_toggle_button": 0
+        },
+        "processor": {
+            "gripper": {
+                "use_gripper": false
+            },
+            "image_preprocessing": {
+                "crop_params_dict": {
+                    "observation.images.front":[147,276,128,128]
+                },
+                "resize_size": [128, 128]
+            }
+        }
+    },
+    "dataset": {
+        "repo_id": "1",
+        "root": "data/rm75_demos3_reshape2",
+        "task": "test",
+        "num_episodes_to_record": 1
+    },
+    "mode": "record"
+}
