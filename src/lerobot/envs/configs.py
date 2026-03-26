@@ -210,6 +210,7 @@ class ResetConfig:
     reset_time_s: float = 5.0
     control_time_s: float = 20.0
     terminate_on_success: bool = True
+    wait_for_key: bool = False
 
 
 @dataclass

@@ -170,10 +170,9 @@ class SpaceMouseTeleop(Teleoperator):
         success = False
         rerecord = False
         key = self._read_key()
-        if key == "\n" or key == "\r":  # Enter = success
+        if key == "\n" or key == "\r":  # Enter = success (terminate_on_success config controls DONE)
             success = True
-            terminate = True
-            logger.info("Keyboard: Enter pressed → episode SUCCESS")
+            logger.info("Keyboard: Enter → SUCCESS locked (terminate_on_success controls episode end)")
         elif key == "\x7f" or key == "\x08":  # Backspace = rerecord
             rerecord = True
             terminate = True

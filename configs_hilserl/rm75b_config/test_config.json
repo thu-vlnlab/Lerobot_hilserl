@@ -17,8 +17,8 @@
                 "front": {
                     "type": "intelrealsense",
                     "serial_number_or_name": "352122273493",
-                    "width": 1280,
-                    "height": 720, 
+                    "width": 640,
+                    "height": 480, 
                     "fps": 30
                 }
             }
@@ -35,9 +35,21 @@
             "gripper": {
                 "use_gripper": false
             },
+            "reset": {
+                "fixed_reset_joint_positions": null,
+                "reset_time_s": 2.0,
+                "control_time_s": 60.0,
+                "terminate_on_success": false,
+                "wait_for_key": true
+            },
+            "reward_classifier": {
+                "pretrained_path": null,
+                "success_threshold": 0.5,
+                "success_reward": 1.0
+            },
             "image_preprocessing": {
                 "crop_params_dict": {
-                    "observation.images.front":[296,576,256,256]
+                    "observation.images.front":[147,276,128,128]
                 },
                 "resize_size": [128, 128]
             }
@@ -45,9 +57,9 @@
     },
     "dataset": {
         "repo_id": "1",
-        "root": "data/rm75_first_1280",
+        "root": "data/rm75_reward_data_collection",
         "task": "test",
-        "num_episodes_to_record": 1
+        "num_episodes_to_record": 3
     },
     "mode": "record"
 }

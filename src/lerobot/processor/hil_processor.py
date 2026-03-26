@@ -410,6 +410,13 @@ class InterventionActionProcessorStep(ProcessorStep):
     use_gripper: bool = False
     terminate_on_success: bool = True
 
+    def __post_init__(self):
+        self._success_locked: bool = False
+
+    def reset(self) -> None:
+        """Clear sticky success state between episodes."""
+        self._success_locked = False
+
     def __call__(self, transition: EnvTransition) -> EnvTransition:
         """
         Processes the transition to handle interventions.
@@ -455,11 +462,15 @@ class InterventionActionProcessorStep(ProcessorStep):
             teleop_action_tensor = torch.tensor(action_list, dtype=action.dtype, device=action.device)
             new_transition[TransitionKey.ACTION] = teleop_action_tensor
 
+        # Sticky success: once Enter is pressed, all subsequent frames get reward=1
+        if success:
+            self._success_locked = True
+
         # Handle episode termination
         new_transition[TransitionKey.DONE] = bool(terminate_episode) or (
             self.terminate_on_success and success
         )
-        new_transition[TransitionKey.REWARD] = float(success)
+        new_transition[TransitionKey.REWARD] = 1.0 if self._success_locked else 0.0
 
         # Update info with intervention metadata
         info = new_transition.get(TransitionKey.INFO, {})

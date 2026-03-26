@@ -178,6 +178,8 @@ class RobotEnv(gym.Env):
         display_cameras: bool = False,
         reset_pose: list[float] | None = None,
         reset_time_s: float = 5.0,
+        wait_for_key: bool = False,
+        teleop_device=None,
     ) -> None:
         """Initialize robot environment with configuration options.
 
@@ -216,6 +218,7 @@ class RobotEnv(gym.Env):
 
         self.reset_pose = reset_pose
         self.reset_time_s = reset_time_s
+        self.wait_for_key = wait_for_key
 
         self.use_gripper = use_gripper
         self._raw_joint_positions = None
@@ -305,6 +308,14 @@ class RobotEnv(gym.Env):
             log_say("Reset the environment done.", play_sounds=True)
 
         precise_sleep(self.reset_time_s - (time.perf_counter() - start_time))
+
+        if self.wait_for_key:
+            import select
+            import sys as _sys
+            print("\n[RESET] 手动将机械臂复位到起始位置，然后按 Enter 开始下一 episode...")
+            select.select([_sys.stdin], [], [], None)
+            _sys.stdin.read(1)
+            print("[RESET] 开始下一 episode")
 
         super().reset(seed=seed, options=options)
 
@@ -419,12 +430,14 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         cfg.processor.observation.display_cameras if cfg.processor.observation is not None else False
     )
     reset_pose = cfg.processor.reset.fixed_reset_joint_positions if cfg.processor.reset is not None else None
+    wait_for_key = cfg.processor.reset.wait_for_key if cfg.processor.reset is not None else False
 
     env = RobotEnv(
         robot=robot,
         use_gripper=use_gripper,
         display_cameras=display_cameras,
         reset_pose=reset_pose,
+        wait_for_key=wait_for_key,
     )
 
     return env, teleop_device
