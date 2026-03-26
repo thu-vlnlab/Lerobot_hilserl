@@ -219,6 +219,7 @@ class RobotEnv(gym.Env):
         self.reset_pose = reset_pose
         self.reset_time_s = reset_time_s
         self.wait_for_key = wait_for_key
+        self._teleop_device = teleop_device
 
         self.use_gripper = use_gripper
         self._raw_joint_positions = None
@@ -287,6 +288,67 @@ class RobotEnv(gym.Env):
             dtype=np.float32,
         )
 
+    def _teleop_reset_loop(self) -> None:
+        """Teleoperate the robot back to start position, then press Enter to begin next episode."""
+        teleop = self._teleop_device
+        sleep_dt = 1.0 / 20.0
+        has_ee = "ee.x" in getattr(self.robot, "action_features", {})
+
+        print("\n[RESET] SpaceMouse 遥控复位到起始位置，按 Enter 开始下一 episode...")
+
+        while True:
+            step_start = time.perf_counter()
+
+            # Check for Enter key
+            key = None
+            if teleop is not None and hasattr(teleop, "_read_key"):
+                key = teleop._read_key()
+            else:
+                import select
+                import sys as _sys
+                if select.select([_sys.stdin], [], [], 0)[0]:
+                    key = _sys.stdin.read(1)
+
+            if key in ("\n", "\r"):
+                print("[RESET] 开始下一 episode")
+                break
+
+            # Apply SpaceMouse deltas to EE position
+            if teleop is not None and has_ee:
+                reader = getattr(teleop, "reader", None)
+                if reader is not None:
+                    # get_action() reads axes + updates _suction_state via button edge detection
+                    action_dict = teleop.get_action()
+                    dx = float(action_dict.get("delta_x", 0.0))
+                    dy = float(action_dict.get("delta_y", 0.0))
+                    dz = float(action_dict.get("delta_z", 0.0))
+
+                    # Use cached last pose (no camera read) to avoid latency
+                    cur = getattr(self.robot, "_last_pose", None)
+                    if cur and len(cur) >= 3:
+                        action = {
+                            "ee.x": cur[0] + dx,
+                            "ee.y": cur[1] + dy,
+                            "ee.z": cur[2] + dz,
+                        }
+                        self.robot.send_action(action)
+                        # Update cache manually so next frame has fresh position
+                        wb = getattr(getattr(self.robot, "config", None), "workspace_bounds", None)
+                        if wb:
+                            self.robot._last_pose = [
+                                max(wb["min"][0], min(wb["max"][0], cur[0] + dx)),
+                                max(wb["min"][1], min(wb["max"][1], cur[1] + dy)),
+                                max(wb["min"][2], min(wb["max"][2], cur[2] + dz)),
+                                cur[3], cur[4], cur[5],
+                            ]
+
+            # Side-channel suction: mirror same logic as step_env_and_process_transition
+            _suction_ctrl = getattr(self.robot, "_suction", None)
+            if _suction_ctrl is not None and teleop is not None and hasattr(teleop, "_suction_state"):
+                _suction_ctrl.set_state(bool(teleop._suction_state))
+
+            precise_sleep(sleep_dt - (time.perf_counter() - step_start))
+
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -310,12 +372,7 @@ class RobotEnv(gym.Env):
         precise_sleep(self.reset_time_s - (time.perf_counter() - start_time))
 
         if self.wait_for_key:
-            import select
-            import sys as _sys
-            print("\n[RESET] 手动将机械臂复位到起始位置，然后按 Enter 开始下一 episode...")
-            select.select([_sys.stdin], [], [], None)
-            _sys.stdin.read(1)
-            print("[RESET] 开始下一 episode")
+            self._teleop_reset_loop()
 
         super().reset(seed=seed, options=options)
 
@@ -438,6 +495,7 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         display_cameras=display_cameras,
         reset_pose=reset_pose,
         wait_for_key=wait_for_key,
+        teleop_device=teleop_device,
     )
 
     return env, teleop_device
