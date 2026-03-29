@@ -44,6 +44,7 @@ from lerobot.processor import (
     MotorCurrentProcessorStep,
     Numpy2TorchActionProcessorStep,
     PiperDeltaToAbsoluteEEStep,
+    RM75DeltaToAbsoluteEEStep,
     RewardClassifierProcessorStep,
     RobotActionToPolicyActionProcessorStep,
     TimeLimitProcessorStep,
@@ -155,6 +156,14 @@ def reset_follower_position(robot_arm: Robot, target_position: np.ndarray) -> No
 
         # Switch back to end-effector control mode if needed
         robot_arm._piper.MotionCtrl_2(0x01, 0x00, 50, 0x00)
+    # For RM75 robots - blocking joint-space reset
+    elif hasattr(robot_arm, '_arm') and hasattr(robot_arm._arm, 'go_home'):
+        target_joints_deg = target_position[:7].tolist()
+        robot_arm._arm.go_home(joints_deg=target_joints_deg)
+        if len(target_position) > 7:
+            robot_arm._arm.set_gripper_position(float(target_position[7]))
+        if hasattr(robot_arm, '_fixed_orientation'):
+            robot_arm._fixed_orientation = None
     else:
         logging.warning("reset_follower_position: Unknown robot type, skipping reset")
 
@@ -169,6 +178,8 @@ class RobotEnv(gym.Env):
         display_cameras: bool = False,
         reset_pose: list[float] | None = None,
         reset_time_s: float = 5.0,
+        wait_for_key: bool = False,
+        teleop_device=None,
     ) -> None:
         """Initialize robot environment with configuration options.
 
@@ -207,6 +218,8 @@ class RobotEnv(gym.Env):
 
         self.reset_pose = reset_pose
         self.reset_time_s = reset_time_s
+        self.wait_for_key = wait_for_key
+        self._teleop_device = teleop_device
 
         self.use_gripper = use_gripper
         self._raw_joint_positions = None
@@ -275,6 +288,67 @@ class RobotEnv(gym.Env):
             dtype=np.float32,
         )
 
+    def _teleop_reset_loop(self) -> None:
+        """Teleoperate the robot back to start position, then press Enter to begin next episode."""
+        teleop = self._teleop_device
+        sleep_dt = 1.0 / 20.0
+        has_ee = "ee.x" in getattr(self.robot, "action_features", {})
+
+        print("\n[RESET] SpaceMouse 遥控复位到起始位置，按 Enter 开始下一 episode...")
+
+        while True:
+            step_start = time.perf_counter()
+
+            # Check for Enter key
+            key = None
+            if teleop is not None and hasattr(teleop, "_read_key"):
+                key = teleop._read_key()
+            else:
+                import select
+                import sys as _sys
+                if select.select([_sys.stdin], [], [], 0)[0]:
+                    key = _sys.stdin.read(1)
+
+            if key in ("\n", "\r"):
+                print("[RESET] 开始下一 episode")
+                break
+
+            # Apply SpaceMouse deltas to EE position
+            if teleop is not None and has_ee:
+                reader = getattr(teleop, "reader", None)
+                if reader is not None:
+                    # get_action() reads axes + updates _suction_state via button edge detection
+                    action_dict = teleop.get_action()
+                    dx = float(action_dict.get("delta_x", 0.0))
+                    dy = float(action_dict.get("delta_y", 0.0))
+                    dz = float(action_dict.get("delta_z", 0.0))
+
+                    # Use cached last pose (no camera read) to avoid latency
+                    cur = getattr(self.robot, "_last_pose", None)
+                    if cur and len(cur) >= 3:
+                        action = {
+                            "ee.x": cur[0] + dx,
+                            "ee.y": cur[1] + dy,
+                            "ee.z": cur[2] + dz,
+                        }
+                        self.robot.send_action(action)
+                        # Update cache manually so next frame has fresh position
+                        wb = getattr(getattr(self.robot, "config", None), "workspace_bounds", None)
+                        if wb:
+                            self.robot._last_pose = [
+                                max(wb["min"][0], min(wb["max"][0], cur[0] + dx)),
+                                max(wb["min"][1], min(wb["max"][1], cur[1] + dy)),
+                                max(wb["min"][2], min(wb["max"][2], cur[2] + dz)),
+                                cur[3], cur[4], cur[5],
+                            ]
+
+            # Side-channel suction: mirror same logic as step_env_and_process_transition
+            _suction_ctrl = getattr(self.robot, "_suction", None)
+            if _suction_ctrl is not None and teleop is not None and hasattr(teleop, "_suction_state"):
+                _suction_ctrl.set_state(bool(teleop._suction_state))
+
+            precise_sleep(sleep_dt - (time.perf_counter() - step_start))
+
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -296,6 +370,9 @@ class RobotEnv(gym.Env):
             log_say("Reset the environment done.", play_sounds=True)
 
         precise_sleep(self.reset_time_s - (time.perf_counter() - start_time))
+
+        if self.wait_for_key:
+            self._teleop_reset_loop()
 
         super().reset(seed=seed, options=options)
 
@@ -410,12 +487,15 @@ def make_robot_env(cfg: HILSerlRobotEnvConfig) -> tuple[gym.Env, Any]:
         cfg.processor.observation.display_cameras if cfg.processor.observation is not None else False
     )
     reset_pose = cfg.processor.reset.fixed_reset_joint_positions if cfg.processor.reset is not None else None
+    wait_for_key = cfg.processor.reset.wait_for_key if cfg.processor.reset is not None else False
 
     env = RobotEnv(
         robot=robot,
         use_gripper=use_gripper,
         display_cameras=display_cameras,
         reset_pose=reset_pose,
+        wait_for_key=wait_for_key,
+        teleop_device=teleop_device,
     )
 
     return env, teleop_device
@@ -545,18 +625,56 @@ def make_processors(
         ),
     ]
 
-    # Check if robot uses end-effector control (e.g., PiperFollowerEndEffector)
+    # Check if robot uses end-effector control (e.g., PiperFollowerEndEffector, RM75FollowerEndEffector)
     uses_ee_control = hasattr(env.robot, 'action_features') and "ee.x" in env.robot.action_features
 
-    # For Piper with end-effector control and no IK, add delta to absolute converter
+    # For robots with end-effector control and no IK, add delta to absolute converter
     if uses_ee_control and cfg.processor.inverse_kinematics is None:
-        max_gripper = cfg.processor.max_gripper_pos if cfg.processor.max_gripper_pos else 70.0
-        action_pipeline_steps.append(
-            PiperDeltaToAbsoluteEEStep(
-                ee_step_size=0.02,  # 2cm per delta unit
-                max_gripper_pos=max_gripper,
+        is_rm75_ee = getattr(env.robot, 'name', '') == 'rm75_follower_ee'
+        if is_rm75_ee:
+            # RM75-B: use dedicated processor (ee_step_size=1.0, translation_scale is the only speed knob)
+            ee_bounds = {"x_min": -0.5, "x_max": 0.5, "y_min": -0.5, "y_max": 0.5, "z_min": 0.0, "z_max": 0.7}
+            if hasattr(env.robot, 'config') and hasattr(env.robot.config, 'workspace_bounds'):
+                wb = env.robot.config.workspace_bounds
+                ee_bounds = {
+                    "x_min": wb["min"][0], "x_max": wb["max"][0],
+                    "y_min": wb["min"][1], "y_max": wb["max"][1],
+                    "z_min": wb["min"][2], "z_max": wb["max"][2],
+                }
+            # use_suction controls whether suction enters the ACTION TENSOR (policy action space).
+            # Use teleop's use_suction (not robot's enable_suction) — robot may have hardware
+            # connected but still exclude suction from action space for BC/RL policy.
+            # Physical relay is handled via side-channel regardless of this flag.
+            _teleop_cfg = getattr(teleop_device, 'config', None)
+            ee_use_suction = getattr(_teleop_cfg, 'use_suction', False)
+            action_pipeline_steps.append(
+                RM75DeltaToAbsoluteEEStep(
+                    ee_step_size=1.0,
+                    use_suction=ee_use_suction,
+                    ee_bounds=ee_bounds,
+                )
             )
-        )
+        else:
+            # Piper / other EE robots
+            ee_use_gripper = cfg.processor.gripper.use_gripper if cfg.processor.gripper is not None else True
+            max_gripper = cfg.processor.max_gripper_pos if cfg.processor.max_gripper_pos else 70.0
+            ee_bounds = {"x_min": 0.136, "x_max": 0.38, "y_min": -0.159, "y_max": 0.220, "z_min": 0.135, "z_max": 0.3}
+            if hasattr(env.robot, 'config') and hasattr(env.robot.config, 'workspace_bounds'):
+                wb = env.robot.config.workspace_bounds
+                ee_bounds = {
+                    "x_min": wb["min"][0], "x_max": wb["max"][0],
+                    "y_min": wb["min"][1], "y_max": wb["max"][1],
+                    "z_min": wb["min"][2], "z_max": wb["max"][2],
+                }
+                max_gripper = getattr(env.robot.config, 'gripper_open_pos', max_gripper)
+            action_pipeline_steps.append(
+                PiperDeltaToAbsoluteEEStep(
+                    ee_step_size=0.02,
+                    max_gripper_pos=max_gripper,
+                    use_gripper=ee_use_gripper,
+                    ee_bounds=ee_bounds,
+                )
+            )
 
     # Replace InverseKinematicsProcessor with new kinematic processors
     if cfg.processor.inverse_kinematics is not None and kinematics_solver is not None:
@@ -619,28 +737,33 @@ def step_env_and_process_transition(
     # Create action transition
     transition[TransitionKey.ACTION] = action
 
-    # Get observation for action processor
-    # For Piper EE control, we need the full observation including ee.x, ee.y, ee.z
-    if hasattr(env, "_get_observation"):
-        current_obs = env._get_observation()
-        # Include both raw joint positions and EE positions
-        obs_for_action = {}
-        if hasattr(env, "get_raw_joint_positions"):
-            obs_for_action.update(env.get_raw_joint_positions())
-        # Add EE positions if available
-        for key in ["ee.x", "ee.y", "ee.z", "gripper.pos"]:
-            if key in current_obs:
-                obs_for_action[key] = current_obs[key]
-        transition[TransitionKey.OBSERVATION] = obs_for_action
-    else:
-        transition[TransitionKey.OBSERVATION] = (
-            env.get_raw_joint_positions() if hasattr(env, "get_raw_joint_positions") else {}
-        )
+    # Supply ee.x/y/z to action processor (RM75 processor needs it for one-time init).
+    # Use _last_pose cached from previous get_observation() — zero extra TCP calls.
+    robot = getattr(env, 'robot', None)
+    last_pose = getattr(robot, '_last_pose', None)
+    if last_pose is not None and len(last_pose) >= 3:
+        transition[TransitionKey.OBSERVATION] = {
+            "ee.x": last_pose[0], "ee.y": last_pose[1], "ee.z": last_pose[2],
+        }
+    elif hasattr(env, "get_raw_joint_positions"):
+        transition[TransitionKey.OBSERVATION] = env.get_raw_joint_positions()
 
     processed_action_transition = action_processor(transition)
     processed_action = processed_action_transition[TransitionKey.ACTION]
 
     obs, reward, terminated, truncated, info = env.step(processed_action)
+
+    # Side-channel suction: read _suction_state directly from the teleop object
+    # (InterventionActionProcessorStep converts the teleop dict to a tensor, losing suction.state)
+    _suction_ctrl = getattr(getattr(env, 'robot', None), '_suction', None)
+    if _suction_ctrl is not None:
+        _teleop = None
+        for _step in action_processor.steps:
+            if hasattr(_step, 'teleop_device'):
+                _teleop = _step.teleop_device
+                break
+        if _teleop is not None and hasattr(_teleop, '_suction_state'):
+            _suction_ctrl.set_state(bool(_teleop._suction_state))
 
     reward = reward + processed_action_transition[TransitionKey.REWARD]
     terminated = terminated or processed_action_transition[TransitionKey.DONE]
@@ -660,6 +783,10 @@ def step_env_and_process_transition(
         complementary_data=complementary_data,
     )
     new_transition = env_processor(new_transition)
+
+    # Carry RM75 target through for record-time action delta computation
+    if "rm75_target_xyz" in processed_action_transition:
+        new_transition["rm75_target_xyz"] = processed_action_transition["rm75_target_xyz"]
 
     return new_transition
 
@@ -943,6 +1070,12 @@ def control_loop(
     """
     dt = 1.0 / cfg.env.fps
 
+    # Frequency decoupling: control at cfg.env.fps, record at cfg.env.record_fps
+    _record_fps = getattr(cfg.env, 'record_fps', None) or cfg.env.fps
+    record_every = max(1, round(cfg.env.fps / _record_fps))
+    if record_every > 1:
+        print(f"Control @ {cfg.env.fps} Hz, recording @ {_record_fps} Hz (every {record_every} steps)")
+
     print(f"Starting control loop at {cfg.env.fps} FPS")
     print("Controls:")
     print("- Use gamepad/teleop device for intervention")
@@ -999,10 +1132,11 @@ def control_loop(
                     "names": ["channels", "height", "width"],
                 }
 
-        # Create dataset
+        # Create dataset — use record_fps so video/parquet timestamps are correct
+        _dataset_fps = getattr(cfg.env, 'record_fps', None) or cfg.env.fps
         dataset = LeRobotDataset.create(
             cfg.dataset.repo_id,
-            cfg.env.fps,
+            _dataset_fps,
             root=cfg.dataset.root,
             use_videos=True,
             image_writer_threads=4,
@@ -1013,6 +1147,10 @@ def control_loop(
     episode_idx = 0
     episode_step = 0
     episode_start_time = time.perf_counter()
+
+    # Frequency monitor
+    _freq_last_time = time.perf_counter()
+    _freq_step_count = 0
 
     while episode_idx < cfg.dataset.num_episodes_to_record:
         step_start_time = time.perf_counter()
@@ -1033,23 +1171,50 @@ def control_loop(
         terminated = transition.get(TransitionKey.DONE, False)
         truncated = transition.get(TransitionKey.TRUNCATED, False)
 
-        if cfg.mode == "record":
+        if cfg.mode == "record" and (episode_step % record_every == 0):
             observations = {
                 k: v.squeeze(0).cpu()
                 for k, v in transition[TransitionKey.OBSERVATION].items()
                 if isinstance(v, torch.Tensor)
             }
-            # Use teleop_action if available, otherwise use the action from the transition
-            # For gym_hil, teleop_action is in INFO (priority); for real robot, it's in COMPLEMENTARY_DATA
-            # Check INFO first (gym_hil returns actual gamepad action here)
-            action_to_record = transition[TransitionKey.INFO].get("teleop_action")
-            if action_to_record is None:
-                action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get("teleop_action")
-            if action_to_record is None:
-                action_to_record = transition[TransitionKey.ACTION]
-            # Convert numpy array to tensor if needed
-            if not isinstance(action_to_record, torch.Tensor):
-                action_to_record = torch.tensor(action_to_record, dtype=torch.float32)
+
+            # For RM75 EE: action = target_xyz - obs_ee_xyz (real displacement in meters)
+            is_rm75_ee = getattr(getattr(env, 'robot', None), 'name', '') == 'rm75_follower_ee'
+            if is_rm75_ee:
+                # Get the internal target from the RM75 processor step
+                rm75_target = transition.get("rm75_target_xyz", None)
+                if rm75_target is not None:
+                    obs_dict = transition[TransitionKey.OBSERVATION]
+                    def _v(v): return float(v.item() if hasattr(v, 'item') else v)
+                    obs_x = _v(obs_dict.get("ee.x", rm75_target[0]))
+                    obs_y = _v(obs_dict.get("ee.y", rm75_target[1]))
+                    obs_z = _v(obs_dict.get("ee.z", rm75_target[2]))
+                    action_vals = [rm75_target[0] - obs_x, rm75_target[1] - obs_y, rm75_target[2] - obs_z]
+                    # Append suction state if enabled
+                    action_from_teleop = transition[TransitionKey.COMPLEMENTARY_DATA].get("teleop_action")
+                    if action_from_teleop is not None and not isinstance(action_from_teleop, torch.Tensor):
+                        action_from_teleop = torch.tensor(action_from_teleop, dtype=torch.float32)
+                    if action_from_teleop is not None and len(action_from_teleop) > 3:
+                        action_vals.append(float(action_from_teleop[3]))
+                    action_to_record = torch.tensor(action_vals, dtype=torch.float32)
+                else:
+                    action_to_record = transition[TransitionKey.ACTION]
+                    if not isinstance(action_to_record, torch.Tensor):
+                        action_to_record = torch.tensor(action_to_record, dtype=torch.float32)
+            else:
+                # Use teleop_action if available, otherwise use the action from the transition
+                # For gym_hil, teleop_action is in INFO (priority); for real robot, it's in COMPLEMENTARY_DATA
+                action_to_record = transition[TransitionKey.INFO].get("teleop_action")
+                if action_to_record is None:
+                    action_to_record = transition[TransitionKey.COMPLEMENTARY_DATA].get("teleop_action")
+                if action_to_record is None:
+                    action_to_record = transition[TransitionKey.ACTION]
+                if not isinstance(action_to_record, torch.Tensor):
+                    action_to_record = torch.tensor(action_to_record, dtype=torch.float32)
+
+            # Ensure no batch dimension on action
+            action_to_record = action_to_record.squeeze(0) if action_to_record.dim() > 1 else action_to_record
+
             frame = {
                 **observations,
                 ACTION: action_to_record.cpu(),
@@ -1094,6 +1259,15 @@ def control_loop(
 
         # Maintain fps timing
         precise_sleep(dt - (time.perf_counter() - step_start_time))
+
+        # Print actual frequency every 100 steps
+        _freq_step_count += 1
+        if _freq_step_count >= 100:
+            _now = time.perf_counter()
+            actual_hz = _freq_step_count / (_now - _freq_last_time)
+            print(f"\r[Hz] actual={actual_hz:.1f}  target={cfg.env.fps}  step={episode_step}", end="", flush=True)
+            _freq_last_time = _now
+            _freq_step_count = 0
 
     if dataset is not None and cfg.dataset.push_to_hub:
         logging.info("Pushing dataset to hub")

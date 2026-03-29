@@ -116,8 +116,11 @@ def main():
 
     # Image preprocessing (match training: MEAN_STD normalization)
     def preprocess_image(frame):
+        # Crop first (match training: [y, x, h, w] = [147, 276, 128, 128])
+        y, x, h, w = 147, 276, 128, 128
+        img = frame[y:y+h, x:x+w]
         # Resize to 128x128 (match training)
-        img = cv2.resize(frame, (128, 128))
+        img = cv2.resize(img, (128, 128))
         # BGR to RGB
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         # Normalize to [0, 1]
@@ -154,8 +157,11 @@ def main():
             # Predict
             with torch.no_grad():
                 # Call predict directly with image list
+                import time 
+                model_start_time = time.time()
+                print(model_start_time)
                 output = model.predict([img_tensor])
-
+                print("resnet_use_time=",time.time()-model_start_time)
                 # Get probability (binary classification)
                 if output.probabilities is not None:
                     success_prob = output.probabilities[0].item()
@@ -183,6 +189,12 @@ def main():
             # Draw threshold line
             threshold_x = 10 + int(400 * args.threshold)
             cv2.line(frame, (threshold_x, 55), (threshold_x, 95), (255, 255, 0), 2)
+
+            # Draw crop region indicator
+            y, x, h, w = 147, 276, 128, 128
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (255, 255, 0), 2)
+            cv2.putText(frame, "Crop Region", (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 1)
 
             # Show frame
             cv2.imshow("Reward Classifier", frame)

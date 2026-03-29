@@ -1,0 +1,35 @@
+{
+  "dataset": {
+    "repo_id": "rm75_reward",
+    "root": "data/rm75_reward_data_collection"
+  },
+  "policy": {
+    "type": "reward_classifier",
+    "model_name": "helper2424/resnet10",
+    "model_type": "cnn",
+    "num_cameras": 1,
+    "num_classes": 2,
+    "hidden_dim": 256,
+    "dropout_rate": 0.1,
+    "learning_rate": 1e-4,
+    "device": "cuda",
+    "use_amp": true,
+    "push_to_hub": false,
+    "input_features": {
+      "observation.images.front": {
+        "type": "VISUAL",
+        "shape": [3, 128, 128]
+      }
+    }
+  },
+  "output_dir": "outputs/rm75_reward_classifier",
+  "batch_size": 16,
+  "steps": 8000,
+  "eval_freq": 300,
+  "save_freq": 3000,
+  "log_freq": 50,
+  "wandb": {
+    "enable": false,
+    "project": "rm75_reward_classifier"
+  }
+}

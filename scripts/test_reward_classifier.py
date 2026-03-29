@@ -9,9 +9,9 @@ from lerobot.policies.factory import make_pre_post_processors
 
 def main():
     # === Configuration ===
-    model_path = "/home/qzl/data/Lerobot_hilserl/outputs/train/2026-01-07/17-55-28_reward_classifier/checkpoints/last/pretrained_model"
-    dataset_root = "/home/qzl/data/sim_demos"
-    repo_id = "test/sim_demo"
+    model_path = "outputs/rm75_reward_classifier/checkpoints/last/pretrained_model"
+    dataset_root = "data/rm75_reward_data_collection"
+    repo_id = "rm75_reward"
     device = "cuda"
 
     # === Load model ===
@@ -39,7 +39,7 @@ def main():
     total = 0
 
     # Test on a subset
-    test_indices = list(range(0, len(dataset), max(1, len(dataset) // 50)))  # Sample ~50 frames
+    test_indices = list(range(0, len(dataset), max(1, len(dataset) // len(dataset))))  # Sample ~50 frames
 
     results = {"TP": 0, "TN": 0, "FP": 0, "FN": 0}
 
