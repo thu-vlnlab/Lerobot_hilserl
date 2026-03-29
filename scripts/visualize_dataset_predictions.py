@@ -19,8 +19,9 @@ def main():
     parser.add_argument("--model-path", type=str, default="outputs/reward_classifier_piper2")
     parser.add_argument("--data-path", type=str, default="data/demos5")
     parser.add_argument("--threshold", type=float, default=0.5)
-    parser.add_argument("--scale", type=float, default=6.0, help="Scale factor for display")
+    parser.add_argument("--scale", type=float, default=1.0, help="Scale factor for output video")
     parser.add_argument("--fast", action="store_true", help="Fast mode: only print statistics, no visualization")
+    parser.add_argument("--output", type=str, default="predictions_output.mp4", help="Output annotated video path")
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -149,11 +150,14 @@ def main():
 
     print(f"Using video: {video_path}")
 
-    # Open video
-    cap = cv2.VideoCapture(str(video_path))
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    print(f"Video: {total_frames} frames at {fps} fps")
+    # Open video with PyAV (software decoding, supports AV1)
+    import av
+    av_container = av.open(str(video_path))
+    av_stream = av_container.streams.video[0]
+    av_stream.codec_context.thread_type = av.codec.context.ThreadType.AUTO
+    total_frames = av_stream.frames if av_stream.frames else 0
+    fps = float(av_stream.average_rate) if av_stream.average_rate else 30.0
+    print(f"Video: {total_frames} frames at {fps:.1f} fps")
 
     # Get ground truth rewards
     rewards = df["next.reward"].values if "next.reward" in df.columns else None
@@ -177,35 +181,40 @@ def main():
     if args.fast:
         # Fast mode: process all frames without visualization
         print("\nFast mode: processing all frames...")
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
+        for packet in av_container.demux(av_stream):
+            for av_frame in packet.decode():
+                frame = av_frame.to_ndarray(format="bgr24")
 
-            img_tensor = preprocess_image(frame)
-            with torch.no_grad():
-                output = model.predict([img_tensor])
-                pred_prob = output.probabilities[0].item() if output.probabilities is not None else torch.sigmoid(output.logits[0]).item()
+                img_tensor = preprocess_image(frame)
+                with torch.no_grad():
+                    output = model.predict([img_tensor])
+                    pred_prob = output.probabilities[0].item() if output.probabilities is not None else torch.sigmoid(output.logits[0]).item()
 
-            predictions.append(pred_prob)
-            frame_idx += 1
-            if frame_idx % 500 == 0:
-                print(f"  {frame_idx}/{total_frames} frames...")
+                predictions.append(pred_prob)
+                frame_idx += 1
+                if frame_idx % 500 == 0:
+                    print(f"  {frame_idx}/{total_frames} frames...")
 
         print(f"Processed {frame_idx} frames")
     else:
-        # Visualization mode
-        print("\nProcessing frames... Press 'q' to quit, Space to pause/resume")
+        # Visualization mode — pre-decode all frames for looping support
+        print("\nDecoding video frames...")
+        all_frames = []
+        for packet in av_container.demux(av_stream):
+            for av_frame in packet.decode():
+                all_frames.append(av_frame.to_ndarray(format="bgr24"))
+        print(f"Decoded {len(all_frames)} frames. Press 'q' to quit, Space to pause/resume")
+        total_frames = len(all_frames)
         paused = False
+        display_frame = None
 
         while True:
             if not paused:
-                ret, frame = cap.read()
-                if not ret:
+                if frame_idx >= len(all_frames):
                     # Loop back
-                    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                     frame_idx = 0
-                    continue
+
+                frame = all_frames[frame_idx]
 
                 # Predict
                 img_tensor = preprocess_image(frame)
@@ -260,7 +269,8 @@ def main():
 
                 frame_idx += 1
 
-            cv2.imshow("Dataset Predictions", display_frame)
+            if display_frame is not None:
+                cv2.imshow("Dataset Predictions", display_frame)
 
             key = cv2.waitKey(30) & 0xFF
             if key == ord('q'):
@@ -269,7 +279,7 @@ def main():
                 paused = not paused
                 print("Paused" if paused else "Resumed")
 
-    cap.release()
+    av_container.close()
     cv2.destroyAllWindows()
 
     # Print summary
